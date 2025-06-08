@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fiori Test Automation</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <span class="icon">🎯</span>
+                <h1>Fiori Test Automation</h1>
+            </div>
+            <div class="status-indicator" id="statusIndicator">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Ready</span>
+            </div>
+        </header>
+
+        <main class="main">
+            <!-- Recording Controls -->
+            <section class="recording-section" id="recordingSection">
+                <div class="session-info" id="sessionInfo" style="display: none;">
+                    <h3 id="sessionName">New Recording Session</h3>
+                    <div class="session-stats">
+                        <div class="stat">
+                            <span class="stat-icon">⏱️</span>
+                            <span>Duration: <span id="duration">00:00</span></span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-icon">🎯</span>
+                            <span>Actions: <span id="actionCount">0</span></span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-icon">🔗</span>
+                            <span>OData: <span id="odataCount">0</span></span>
+                        </div>
+                    </div>
+                    <div class="last-action" id="lastAction">
+                        <span class="action-text">Ready to record...</span>
+                        <span class="confidence" id="confidence"></span>
+                    </div>
+                </div>
+
+                <div class="controls">
+                    <button id="recordBtn" class="btn btn-primary btn-record">
+                        <span class="btn-icon">🔴</span>
+                        Start Recording
+                    </button>
+                    <button id="pauseBtn" class="btn btn-secondary" style="display: none;">
+                        <span class="btn-icon">⏸️</span>
+                        Pause
+                    </button>
+                    <button id="stopBtn" class="btn btn-danger" style="display: none;">
+                        <span class="btn-icon">⏹️</span>
+                        Stop
+                    </button>
+                </div>
+
+                <div class="session-config" id="sessionConfig">
+                    <input type="text" id="sessionNameInput" placeholder="Session name (optional)" class="input">
+                    <div class="checkbox-group">
+                        <label class="checkbox">
+                            <input type="checkbox" id="captureScreenshots" checked>
+                            <span class="checkmark"></span>
+                            Capture screenshots
+                        </label>
+                        <label class="checkbox">
+                            <input type="checkbox" id="captureUI5Context" checked>
+                            <span class="checkmark"></span>
+                            Extract SAPUI5 context
+                        </label>
+                        <label class="checkbox">
+                            <input type="checkbox" id="autoCorrelation" checked>
+                            <span class="checkmark"></span>
+                            Auto-correlate OData
+                        </label>
+                    </div>
+                </div>
+            </section>
+
+            <!-- App Detection -->
+            <section class="app-detection" id="appDetection">
+                <h3>Application Info</h3>
+                <div class="app-info" id="appInfo">
+                    <div class="app-status">
+                        <span class="status-icon" id="appStatusIcon">🔍</span>
+                        <span id="appStatusText">Detecting application...</span>
+                    </div>
+                    <div class="app-details" id="appDetails" style="display: none;">
+                        <div class="detail-row">
+                            <strong>App:</strong> <span id="appName">Unknown</span>
+                        </div>
+                        <div class="detail-row">
+                            <strong>Version:</strong> <span id="ui5Version">-</span>
+                        </div>
+                        <div class="detail-row">
+                            <strong>Theme:</strong> <span id="ui5Theme">-</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Recent Sessions -->
+            <section class="sessions-section">
+                <h3>Recent Sessions</h3>
+                <div class="sessions-list" id="sessionsList">
+                    <div class="no-sessions" id="noSessions">
+                        No recorded sessions yet
+                    </div>
+                </div>
+                <button id="viewAllBtn" class="btn btn-link">View All Sessions</button>
+            </section>
+        </main>
+
+        <footer class="footer">
+            <div class="footer-actions">
+                <button id="settingsBtn" class="btn btn-icon-only" title="Settings">
+                    <span class="btn-icon">⚙️</span>
+                </button>
+                <button id="helpBtn" class="btn btn-icon-only" title="Help">
+                    <span class="btn-icon">❓</span>
+                </button>
+                <button id="exportBtn" class="btn btn-secondary btn-small">
+                    <span class="btn-icon">💾</span>
+                    Export
+                </button>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Processing...</div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

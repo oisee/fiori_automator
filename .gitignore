@@ -1,0 +1,152 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+*.zip
+*.crx
+*.pem
+*.xpi
+
+# Development
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Test coverage
+coverage/
+*.lcov
+.nyc_output/
+
+# Logs
+logs/
+*.log
+lerna-debug.log*
+
+# Session data (sensitive)
+sessions/
+*.session.json
+session-exports/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Chrome extension development
+key.pem
+*.key
+
+# Firefox extension development
+web-ext-artifacts/
+
+# Documentation build
+docs/_build/
+docs/.jekyll-cache/
+
+# Python (if using any Python scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# Testing
+test-results/
+cypress/videos/
+cypress/screenshots/
+.eslintcache
+
+# Package files
+*.tgz
+package-lock.json
+yarn.lock
+
+# Extension private keys and certificates
+certificates/
+*.cert
+*.crt
+*.key
+*.pem
+
+# User-specific configuration
+config.local.json
+settings.local.json
+
+# Debug files
+debug/
+*.heap
+*.cpuprofile
+
+# Extension icons source files (keep only optimized versions)
+icons/*.psd
+icons/*.ai
+icons/*.sketch
+icons/originals/
+
+# Development screenshots
+dev-screenshots/
+test-sessions/
+
+# Local storage backups
+storage-backup/
+
+# Extension update files
+updates.xml
+update_manifest.json
+
+# Analytics and tracking (if any)
+analytics/
+tracking/
+
+# Minified files (if building separately)
+*.min.js
+*.min.css
+!lib/**/*.min.js
+!lib/**/*.min.css
+
+# Source maps
+*.map
+
+# Lock files (depending on preference)
+# Uncomment if you don't want to commit lock files
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
