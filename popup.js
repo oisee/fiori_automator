@@ -23,17 +23,27 @@ class FioriTestPopup {
 
   async checkRecordingState() {
     try {
+      console.log('Checking recording state for tab:', this.currentTab.id);
+      
       // Check if we have an active recording session for this tab
       const response = await chrome.runtime.sendMessage({
         type: 'get-session-data',
         tabId: this.currentTab.id
       });
 
+      console.log('Recording state response:', response);
+
       if (response && response.success && response.data && response.data.isRecording) {
         // Resume the recording state in popup
         this.isRecording = true;
         this.sessionData = response.data;
         this.startTime = this.sessionData.startTime;
+        
+        console.log('Resuming recording state:', {
+          sessionId: this.sessionData.sessionId,
+          startTime: this.startTime,
+          events: this.sessionData.events?.length || 0
+        });
         
         // Update UI to show recording state
         this.updateRecordingState('recording');
@@ -42,10 +52,17 @@ class FioriTestPopup {
         // Restart timer
         this.startRecordingTimer();
         
-        console.log('Resumed recording state from background');
+        // Update session stats if we have events
+        if (this.sessionData.events && this.sessionData.events.length > 0) {
+          this.updateSessionStats(this.sessionData);
+        }
+        
+        console.log('✅ Resumed recording state from background');
+      } else {
+        console.log('No active recording found for this tab');
       }
     } catch (error) {
-      console.error('Failed to check recording state:', error);
+      console.error('❌ Failed to check recording state:', error);
     }
   }
 
@@ -64,6 +81,7 @@ class FioriTestPopup {
     document.getElementById('viewAllBtn').addEventListener('click', () => this.viewAllSessions());
     document.getElementById('settingsBtn').addEventListener('click', () => this.openSettings());
     document.getElementById('helpBtn').addEventListener('click', () => this.openHelp());
+    document.getElementById('popoutBtn').addEventListener('click', () => this.openInWindow());
     document.getElementById('exportBtn').addEventListener('click', () => this.exportSession());
 
     // Listen for background script messages
@@ -81,8 +99,36 @@ class FioriTestPopup {
         break;
 
       case 'session-updated':
-        this.updateSessionStats(message.data);
+        if (message.tabId === this.currentTab?.id) {
+          console.log('Session updated:', message.data);
+          this.sessionData = message.data;
+          this.updateSessionStats(message.data);
+        }
         break;
+
+      case 'event-captured':
+        if (message.tabId === this.currentTab?.id && this.isRecording) {
+          console.log('Event captured, updating stats');
+          // Refresh session data to get latest stats
+          this.refreshSessionData();
+        }
+        break;
+    }
+  }
+
+  async refreshSessionData() {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'get-session-data',
+        tabId: this.currentTab.id
+      });
+
+      if (response && response.success && response.data) {
+        this.sessionData = response.data;
+        this.updateSessionStats(response.data);
+      }
+    } catch (error) {
+      console.error('Failed to refresh session data:', error);
     }
   }
 
@@ -426,6 +472,22 @@ class FioriTestPopup {
   openHelp() {
     // Open help documentation
     chrome.tabs.create({ url: 'https://github.com/your-repo/fiori-test-automation' });
+  }
+
+  openInWindow() {
+    // Open the dedicated recording panel in a separate window
+    const panelUrl = chrome.runtime.getURL('recording-panel.html');
+    chrome.windows.create({
+      url: panelUrl,
+      type: 'popup',
+      width: 420,
+      height: 650,
+      left: 100,
+      top: 100
+    });
+    
+    // Close this popup
+    window.close();
   }
 
   async exportSession() {

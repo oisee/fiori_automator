@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fiori Test Recording Panel</title>
+    <link rel="stylesheet" href="popup.css">
+    <style>
+        body {
+            width: 400px;
+            min-height: 500px;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .window-controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+        }
+        
+        .always-on-top {
+            background: rgba(0, 112, 243, 0.1);
+            border: 1px solid #0070f3;
+        }
+        
+        .pin-button {
+            background: #0070f3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: 5px;
+        }
+        
+        .pin-button:hover {
+            background: #0051cc;
+        }
+        
+        .auto-refresh {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #6c757d;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="window-controls">
+        <button id="pinButton" class="pin-button" title="Keep on top">📌</button>
+        <button id="refreshButton" class="pin-button" title="Refresh">🔄</button>
+    </div>
+
+    <div class="container">
+        <header class="header">
+            <div class="logo">
+                <span class="icon">🎯</span>
+                <h1>Fiori Recording Panel</h1>
+            </div>
+            <div class="status-indicator" id="statusIndicator">
+                <span class="status-dot" id="statusDot"></span>
+                <span id="statusText">Ready</span>
+            </div>
+        </header>
+
+        <main class="main">
+            <!-- Recording Controls -->
+            <section class="recording-section" id="recordingSection">
+                <div class="session-info" id="sessionInfo" style="display: none;">
+                    <h3 id="sessionName">Recording Session</h3>
+                    <div class="session-stats">
+                        <div class="stat">
+                            <span class="stat-icon">⏱️</span>
+                            <span>Duration: <span id="duration">00:00</span></span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-icon">🎯</span>
+                            <span>Actions: <span id="actionCount">0</span></span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-icon">🔗</span>
+                            <span>OData: <span id="odataCount">0</span></span>
+                        </div>
+                    </div>
+                    <div class="last-action" id="lastAction">
+                        <span class="action-text">Ready to record...</span>
+                        <span class="confidence" id="confidence"></span>
+                    </div>
+                </div>
+
+                <div class="controls">
+                    <button id="recordBtn" class="btn btn-primary btn-record">
+                        <span class="btn-icon">🔴</span>
+                        Start Recording
+                    </button>
+                    <button id="pauseBtn" class="btn btn-secondary" style="display: none;">
+                        <span class="btn-icon">⏸️</span>
+                        Pause
+                    </button>
+                    <button id="stopBtn" class="btn btn-danger" style="display: none;">
+                        <span class="btn-icon">⏹️</span>
+                        Stop
+                    </button>
+                </div>
+
+                <div class="session-config" id="sessionConfig">
+                    <input type="text" id="sessionNameInput" placeholder="Session name (optional)" class="input">
+                </div>
+            </section>
+
+            <!-- Live Events Feed -->
+            <section class="events-feed">
+                <h3>Recent Events</h3>
+                <div class="events-list" id="eventsList">
+                    <div class="no-events">No events captured yet</div>
+                </div>
+            </section>
+
+            <div class="auto-refresh">
+                Auto-refreshing every 2 seconds
+            </div>
+        </main>
+
+        <footer class="footer">
+            <div class="footer-actions">
+                <button id="exportBtn" class="btn btn-secondary btn-small">
+                    <span class="btn-icon">💾</span>
+                    Export
+                </button>
+                <button id="sessionsBtn" class="btn btn-secondary btn-small">
+                    <span class="btn-icon">📊</span>
+                    Sessions
+                </button>
+            </div>
+        </footer>
+    </div>
+
+    <script src="recording-panel.js"></script>
+</body>
+</html>

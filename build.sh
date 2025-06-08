@@ -64,6 +64,8 @@ cp sessions.js "$BUILD_DIR/"
 cp settings.html "$BUILD_DIR/"
 cp settings.css "$BUILD_DIR/"
 cp settings.js "$BUILD_DIR/"
+cp recording-panel.html "$BUILD_DIR/"
+cp recording-panel.js "$BUILD_DIR/"
 print_status "Copied core files"
 
 # Copy icons

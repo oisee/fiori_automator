@@ -268,7 +268,21 @@ class FioriTestBackground {
       }
       
       this.log(`Event captured: ${event.type}, Total events: ${session.events.length}`);
+      
+      // Notify popup about the new event
+      this.notifyPopupUpdate(tabId, session);
     }
+  }
+
+  notifyPopupUpdate(tabId, session) {
+    // Send message to update popup if it's open
+    chrome.runtime.sendMessage({
+      type: 'session-updated',
+      tabId,
+      data: { ...session }
+    }).catch(() => {
+      // Popup might not be open, that's fine
+    });
   }
 
   async autoSaveSession(session) {
@@ -324,7 +338,9 @@ class FioriTestBackground {
   }
 
   async getSessionData(tabId) {
-    return this.sessions.get(tabId) || null;
+    const sessionData = this.sessions.get(tabId) || null;
+    this.log(`Getting session data for tab ${tabId}:`, sessionData ? 'Found' : 'Not found');
+    return sessionData;
   }
 
   notifyContentScript(tabId, type, data) {
