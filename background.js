@@ -5,13 +5,43 @@ class FioriTestBackground {
   constructor() {
     this.sessions = new Map();
     this.networkRequests = new Map();
+    this.debug = false;
     this.init();
   }
 
   init() {
+    this.setupDebugMode();
     this.setupNetworkInterception();
     this.setupMessageHandling();
     this.setupStorageHandling();
+  }
+
+  setupDebugMode() {
+    chrome.storage.local.get(['debug-mode'], (result) => {
+      this.debug = result['debug-mode'] === true;
+      if (this.debug) {
+        console.log('🎯 Fiori Background: Debug mode enabled');
+        window.FIORI_BG_DEBUG = true;
+      }
+    });
+
+    // Listen for debug mode changes
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+      if (namespace === 'local' && changes['debug-mode']) {
+        this.debug = changes['debug-mode'].newValue === true;
+        console.log('Debug mode changed:', this.debug);
+      }
+    });
+  }
+
+  log(...args) {
+    if (this.debug) {
+      console.log('[Fiori BG]', new Date().toISOString(), ...args);
+    }
+  }
+
+  logError(...args) {
+    console.error('[Fiori BG Error]', new Date().toISOString(), ...args);
   }
 
   setupNetworkInterception() {
@@ -67,6 +97,12 @@ class FioriTestBackground {
         timestamp: Date.now(),
         requestBody: details.requestBody
       };
+
+      this.log('OData request intercepted:', {
+        url: details.url,
+        method: details.method,
+        requestId: requestData.requestId
+      });
 
       this.networkRequests.set(details.requestId, requestData);
       this.notifyContentScript(details.tabId, 'odata-request-started', requestData);

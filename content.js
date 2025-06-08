@@ -11,10 +11,29 @@ class FioriTestCapture {
   }
 
   init() {
+    this.setupDebugMode();
     this.setupEventListeners();
     this.setupMessageHandling();
     this.detectUI5Context();
     this.injectHelperScript();
+  }
+
+  setupDebugMode() {
+    this.debug = localStorage.getItem('fiori-debug') === 'true';
+    if (this.debug) {
+      console.log('🎯 Fiori Test Capture: Debug mode enabled');
+      window.FIORI_DEBUG = true;
+    }
+  }
+
+  log(...args) {
+    if (this.debug) {
+      console.log('[Fiori Content]', ...args);
+    }
+  }
+
+  logError(...args) {
+    console.error('[Fiori Content Error]', ...args);
   }
 
   setupEventListeners() {
@@ -151,6 +170,7 @@ class FioriTestCapture {
       }
     };
 
+    this.log('Click captured:', eventData);
     await this.sendEventToBackground(eventData);
   }
 
