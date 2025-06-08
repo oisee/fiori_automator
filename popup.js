@@ -15,9 +15,38 @@ class FioriTestPopup {
   async init() {
     await this.getCurrentTab();
     this.setupEventListeners();
+    await this.checkRecordingState();
     this.detectApplication();
     this.loadRecentSessions();
     this.updateUI();
+  }
+
+  async checkRecordingState() {
+    try {
+      // Check if we have an active recording session for this tab
+      const response = await chrome.runtime.sendMessage({
+        type: 'get-session-data',
+        tabId: this.currentTab.id
+      });
+
+      if (response && response.success && response.data && response.data.isRecording) {
+        // Resume the recording state in popup
+        this.isRecording = true;
+        this.sessionData = response.data;
+        this.startTime = this.sessionData.startTime;
+        
+        // Update UI to show recording state
+        this.updateRecordingState('recording');
+        this.updateSessionInfo(this.sessionData.metadata?.sessionName || 'Recording Session');
+        
+        // Restart timer
+        this.startRecordingTimer();
+        
+        console.log('Resumed recording state from background');
+      }
+    } catch (error) {
+      console.error('Failed to check recording state:', error);
+    }
   }
 
   async getCurrentTab() {
@@ -59,6 +88,7 @@ class FioriTestPopup {
 
   async startRecording() {
     try {
+      console.log('Starting recording...');
       this.showLoading('Starting recording...');
 
       const sessionName = document.getElementById('sessionNameInput').value || 
@@ -73,13 +103,18 @@ class FioriTestPopup {
         timestamp: Date.now()
       };
 
+      console.log('Recording config:', config);
+
       // Send start recording message to background script
       const response = await chrome.runtime.sendMessage({
         type: 'start-recording',
-        data: config
+        data: config,
+        tabId: this.currentTab.id
       });
 
-      if (response.success) {
+      console.log('Background response:', response);
+
+      if (response && response.success) {
         this.isRecording = true;
         this.startTime = Date.now();
         this.sessionData = { ...config, events: [], networkRequests: [] };
@@ -92,14 +127,24 @@ class FioriTestPopup {
         this.updateSessionInfo(sessionName);
         
         // Notify content script
-        await chrome.tabs.sendMessage(this.currentTab.id, {
-          type: 'start-recording',
-          data: config
-        });
+        try {
+          await chrome.tabs.sendMessage(this.currentTab.id, {
+            type: 'start-recording',
+            data: config
+          });
+          console.log('Content script notified');
+        } catch (contentError) {
+          console.warn('Could not notify content script:', contentError);
+          // This is okay - content script might not be injected yet
+        }
+        
+        this.showSuccess('Recording started!');
+      } else {
+        throw new Error(response?.error || 'Unknown error');
       }
     } catch (error) {
       console.error('Failed to start recording:', error);
-      this.showError('Failed to start recording');
+      this.showError(`Failed to start recording: ${error.message}`);
     } finally {
       this.hideLoading();
     }

@@ -166,19 +166,25 @@ class FioriTestBackground {
 
   async handleMessage(message, sender, sendResponse) {
     try {
+      this.log('Received message:', message.type);
+      
       switch (message.type) {
         case 'start-recording':
-          await this.startRecording(sender.tab.id, message.data);
+          const tabId = sender.tab?.id || message.tabId;
+          if (!tabId) {
+            throw new Error('No tab ID available');
+          }
+          await this.startRecording(tabId, message.data);
           sendResponse({ success: true });
           break;
 
         case 'stop-recording':
-          await this.stopRecording(sender.tab.id);
+          await this.stopRecording(sender.tab?.id || message.tabId);
           sendResponse({ success: true });
           break;
 
         case 'get-session-data':
-          const sessionData = await this.getSessionData(sender.tab.id);
+          const sessionData = await this.getSessionData(sender.tab?.id || message.tabId);
           sendResponse({ success: true, data: sessionData });
           break;
 
@@ -193,7 +199,7 @@ class FioriTestBackground {
           break;
 
         case 'capture-event':
-          await this.captureEvent(sender.tab.id, message.data);
+          await this.captureEvent(sender.tab?.id || message.tabId, message.data);
           sendResponse({ success: true });
           break;
 
@@ -201,7 +207,7 @@ class FioriTestBackground {
           sendResponse({ success: false, error: 'Unknown message type' });
       }
     } catch (error) {
-      console.error('Background message handling error:', error);
+      this.logError('Background message handling error:', error);
       sendResponse({ success: false, error: error.message });
     }
   }
@@ -255,6 +261,25 @@ class FioriTestBackground {
       
       // Correlate with recent network requests
       this.correlateNetworkRequests(event, session);
+      
+      // Auto-save session periodically
+      if (session.events.length % 10 === 0) {
+        await this.autoSaveSession(session);
+      }
+      
+      this.log(`Event captured: ${event.type}, Total events: ${session.events.length}`);
+    }
+  }
+
+  async autoSaveSession(session) {
+    try {
+      const result = await chrome.storage.local.get(['fioriSessions']);
+      const sessions = result.fioriSessions || {};
+      sessions[session.sessionId] = { ...session };
+      await chrome.storage.local.set({ fioriSessions: sessions });
+      this.log('Session auto-saved');
+    } catch (error) {
+      this.logError('Auto-save failed:', error);
     }
   }
 

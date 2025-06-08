@@ -7,17 +7,14 @@
     "activeTab",
     "storage",
     "scripting",
-    "webRequest",
-    "webRequestSerializable",
-    "host"
+    "webRequest"
   ],
   "host_permissions": [
     "https://*/*",
     "http://*/*"
   ],
   "background": {
-    "service_worker": "background.js",
-    "type": "module"
+    "service_worker": "background.js"
   },
   "content_scripts": [
     {

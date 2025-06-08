@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fiori Test Automation - Settings</title>
+    <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="header-content">
+                <h1>⚙️ Settings</h1>
+                <button id="backBtn" class="btn btn-secondary">← Back</button>
+            </div>
+        </header>
+
+        <main class="main">
+            <div class="settings-section">
+                <h2>Recording Options</h2>
+                <div class="setting-item">
+                    <label class="setting-label">
+                        <input type="checkbox" id="captureScreenshots" checked>
+                        <span>Capture Screenshots</span>
+                    </label>
+                    <p class="setting-description">Take screenshots at each interaction point</p>
+                </div>
+                
+                <div class="setting-item">
+                    <label class="setting-label">
+                        <input type="checkbox" id="captureUI5Context" checked>
+                        <span>Extract SAPUI5 Context</span>
+                    </label>
+                    <p class="setting-description">Capture SAPUI5-specific control information</p>
+                </div>
+                
+                <div class="setting-item">
+                    <label class="setting-label">
+                        <input type="checkbox" id="autoCorrelation" checked>
+                        <span>Auto-correlate OData Requests</span>
+                    </label>
+                    <p class="setting-description">Automatically link UI events with network requests</p>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h2>Correlation Settings</h2>
+                <div class="setting-item">
+                    <label class="setting-label">
+                        <span>Correlation Window (seconds)</span>
+                        <input type="number" id="correlationWindow" value="5" min="1" max="30" class="number-input">
+                    </label>
+                    <p class="setting-description">Time window for correlating UI events with OData calls</p>
+                </div>
+                
+                <div class="setting-item">
+                    <label class="setting-label">
+                        <span>Minimum Confidence (%)</span>
+                        <input type="number" id="minConfidence" value="70" min="0" max="100" class="number-input">
+                    </label>
+                    <p class="setting-description">Minimum confidence score for event correlation</p>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h2>Debug Options</h2>
+                <div class="setting-item">
+                    <label class="setting-label">
+                        <input type="checkbox" id="debugMode">
+                        <span>Enable Debug Mode</span>
+                    </label>
+                    <p class="setting-description">Show detailed logs in browser console</p>
+                </div>
+                
+                <div class="setting-item">
+                    <label class="setting-label">
+                        <input type="checkbox" id="verboseLogging">
+                        <span>Verbose Logging</span>
+                    </label>
+                    <p class="setting-description">Log all events and network requests</p>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h2>Storage Management</h2>
+                <div class="setting-item">
+                    <div class="storage-info">
+                        <span>Sessions stored: <strong id="sessionCount">0</strong></span>
+                        <span>Storage used: <strong id="storageUsed">0 KB</strong></span>
+                    </div>
+                </div>
+                
+                <div class="setting-item">
+                    <button id="clearStorageBtn" class="btn btn-danger">Clear All Data</button>
+                    <button id="exportSettingsBtn" class="btn btn-secondary">Export Settings</button>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h2>About</h2>
+                <div class="about-info">
+                    <p><strong>Version:</strong> 1.0.0</p>
+                    <p><strong>Author:</strong> SAP Development Team</p>
+                    <p><strong>License:</strong> MIT</p>
+                    <p><a href="https://github.com/your-org/fiori-test-automation" target="_blank">View Documentation</a></p>
+                </div>
+            </div>
+
+            <div class="actions">
+                <button id="saveBtn" class="btn btn-primary">Save Settings</button>
+                <button id="resetBtn" class="btn btn-secondary">Reset to Defaults</button>
+            </div>
+        </main>
+    </div>
+
+    <script src="settings.js"></script>
+</body>
+</html>

@@ -58,6 +58,12 @@ cp screenshot.js "$BUILD_DIR/"
 cp popup.html "$BUILD_DIR/"
 cp popup.css "$BUILD_DIR/"
 cp popup.js "$BUILD_DIR/"
+cp sessions.html "$BUILD_DIR/"
+cp sessions.css "$BUILD_DIR/"
+cp sessions.js "$BUILD_DIR/"
+cp settings.html "$BUILD_DIR/"
+cp settings.css "$BUILD_DIR/"
+cp settings.js "$BUILD_DIR/"
 print_status "Copied core files"
 
 # Copy icons

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fiori Test Sessions</title>
+    <link rel="stylesheet" href="sessions.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="header-content">
+                <h1>📊 Recorded Sessions</h1>
+                <button id="backBtn" class="btn btn-secondary">← Back to Extension</button>
+            </div>
+        </header>
+
+        <main class="main">
+            <div class="toolbar">
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="Search sessions..." class="search-input">
+                </div>
+                <div class="actions">
+                    <button id="exportAllBtn" class="btn btn-primary">Export All</button>
+                    <button id="deleteAllBtn" class="btn btn-danger">Delete All</button>
+                </div>
+            </div>
+
+            <div class="sessions-container" id="sessionsContainer">
+                <div class="loading">Loading sessions...</div>
+            </div>
+
+            <div class="no-sessions" id="noSessions" style="display: none;">
+                <h2>No recorded sessions yet</h2>
+                <p>Start recording to see your sessions here</p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Session Details Modal -->
+    <div class="modal" id="sessionModal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Session Details</h2>
+                <button class="modal-close" id="modalClose">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Session details will be inserted here -->
+            </div>
+            <div class="modal-footer">
+                <button id="modalExportBtn" class="btn btn-primary">Export Session</button>
+                <button id="modalReplayBtn" class="btn btn-secondary">Replay</button>
+                <button id="modalDeleteBtn" class="btn btn-danger">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="sessions.js"></script>
+</body>
+</html>
