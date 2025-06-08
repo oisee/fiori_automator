@@ -1,0 +1,41 @@
+{
+  "name": "fiori-test-automation",
+  "version": "1.0.0",
+  "description": "Intelligent test automation system for SAP Fiori applications",
+  "private": true,
+  "scripts": {
+    "build": "./build.sh",
+    "build:dev": "./build.sh dev",
+    "clean": "rm -rf dist/ build/",
+    "icons": "./create-icons.sh",
+    "test": "echo 'No tests configured yet'",
+    "lint": "echo 'No linting configured yet'",
+    "validate": "python3 -m json.tool manifest.json > /dev/null && echo '✓ Manifest valid' || echo '✗ Manifest invalid'",
+    "zip": "cd dist && zip -r ../fiori-extension.zip . && cd ..",
+    "watch": "echo 'Watch mode not implemented - load extension in dev mode instead'"
+  },
+  "keywords": [
+    "sap",
+    "fiori",
+    "ui5",
+    "sapui5",
+    "test-automation",
+    "browser-extension",
+    "odata",
+    "edge-extension",
+    "chrome-extension"
+  ],
+  "author": "SAP Development Team",
+  "license": "MIT",
+  "devDependencies": {},
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/fiori-test-automation"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/fiori-test-automation/issues"
+  }
+}
