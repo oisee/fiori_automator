@@ -73,6 +73,14 @@ class SessionsManager {
       console.log('Loaded sessions:', this.sessions);
     } catch (error) {
       console.error('Failed to load sessions:', error);
+      this.sessions = {};
+      this.filteredSessions = [];
+      
+      // Show error to user
+      const container = document.getElementById('sessionsContainer');
+      if (container) {
+        container.innerHTML = '<div class="error-message">Failed to load sessions. Please refresh the page.</div>';
+      }
     }
   }
 
@@ -163,31 +171,42 @@ class SessionsManager {
     const modalTitle = document.getElementById('modalTitle');
     const modalBody = document.getElementById('modalBody');
     
+    if (!modal || !modalTitle || !modalBody) {
+      console.error('Modal elements not found');
+      return;
+    }
+    
     modalTitle.textContent = session.metadata?.sessionName || 'Session Details';
     
     const startDate = new Date(session.startTime);
     const endDate = session.endTime ? new Date(session.endTime) : null;
     const duration = session.duration ? Math.round(session.duration / 1000) : 0;
     
-    modalBody.innerHTML = `
-      <div class="session-details">
-        <h3>Session Information</h3>
-        <p><strong>Session ID:</strong> ${session.sessionId}</p>
-        <p><strong>URL:</strong> ${session.metadata?.applicationUrl || 'Unknown'}</p>
-        <p><strong>Started:</strong> ${startDate.toLocaleString()}</p>
-        ${endDate ? `<p><strong>Ended:</strong> ${endDate.toLocaleString()}</p>` : ''}
-        <p><strong>Duration:</strong> ${duration} seconds</p>
-        <p><strong>Total Events:</strong> ${session.events?.length || 0}</p>
-        <p><strong>Network Requests:</strong> ${session.networkRequests?.length || 0}</p>
-        
-        <div class="event-list">
-          <h3>Events Timeline</h3>
-          ${this.renderEventList(session.events || [])}
+    try {
+      modalBody.innerHTML = `
+        <div class="session-details">
+          <h3>Session Information</h3>
+          <p><strong>Session ID:</strong> ${session.sessionId}</p>
+          <p><strong>URL:</strong> ${session.metadata?.applicationUrl || 'Unknown'}</p>
+          <p><strong>Started:</strong> ${startDate.toLocaleString()}</p>
+          ${endDate ? `<p><strong>Ended:</strong> ${endDate.toLocaleString()}</p>` : ''}
+          <p><strong>Duration:</strong> ${duration} seconds</p>
+          <p><strong>Total Events:</strong> ${session.events?.length || 0}</p>
+          <p><strong>Network Requests:</strong> ${session.networkRequests?.length || 0}</p>
+          
+          <div class="event-list">
+            <h3>Events Timeline</h3>
+            ${this.renderEventList(session.events || [])}
+          </div>
         </div>
-      </div>
-    `;
-    
-    modal.style.display = 'flex';
+      `;
+      
+      modal.style.display = 'flex';
+    } catch (error) {
+      console.error('Error displaying session details:', error);
+      modalBody.innerHTML = '<p>Error loading session details</p>';
+      modal.style.display = 'flex';
+    }
   }
 
   renderEventList(events) {

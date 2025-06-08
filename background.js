@@ -289,11 +289,107 @@ class FioriTestBackground {
     try {
       const result = await chrome.storage.local.get(['fioriSessions']);
       const sessions = result.fioriSessions || {};
-      sessions[session.sessionId] = { ...session };
+      
+      // Clean session data to prevent circular references
+      const cleanSession = this.cleanSessionData(session);
+      sessions[session.sessionId] = cleanSession;
+      
       await chrome.storage.local.set({ fioriSessions: sessions });
       this.log('Session auto-saved');
     } catch (error) {
       this.logError('Auto-save failed:', error);
+    }
+  }
+
+  cleanSessionData(session) {
+    try {
+      // Create a clean copy without circular references
+      const cleanSession = {
+        sessionId: session.sessionId,
+        tabId: session.tabId,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        duration: session.duration,
+        isRecording: session.isRecording,
+        metadata: { ...session.metadata },
+        events: session.events?.map(event => this.cleanEventData(event)) || [],
+        networkRequests: session.networkRequests?.map(req => this.cleanNetworkData(req)) || []
+      };
+      
+      return cleanSession;
+    } catch (error) {
+      this.logError('Error cleaning session data:', error);
+      // Return minimal session data as fallback
+      return {
+        sessionId: session.sessionId,
+        tabId: session.tabId,
+        startTime: session.startTime,
+        isRecording: session.isRecording,
+        metadata: session.metadata || {},
+        events: [],
+        networkRequests: []
+      };
+    }
+  }
+
+  cleanEventData(event) {
+    try {
+      return {
+        eventId: event.eventId,
+        timestamp: event.timestamp,
+        type: event.type,
+        coordinates: event.coordinates,
+        element: event.element ? {
+          tagName: event.element.tagName,
+          id: event.element.id,
+          className: event.element.className,
+          textContent: event.element.textContent?.slice(0, 200),
+          selector: event.element.selector,
+          xpath: event.element.xpath
+        } : null,
+        ui5Context: event.ui5Context ? {
+          controlType: event.ui5Context.controlType,
+          controlId: event.ui5Context.controlId,
+          properties: event.ui5Context.properties
+        } : null,
+        value: event.value,
+        key: event.key,
+        correlatedRequests: event.correlatedRequests?.map(req => ({
+          requestId: req.requestId,
+          url: req.url,
+          method: req.method,
+          correlation: req.correlation
+        })) || []
+      };
+    } catch (error) {
+      return {
+        eventId: event.eventId,
+        timestamp: event.timestamp,
+        type: event.type
+      };
+    }
+  }
+
+  cleanNetworkData(request) {
+    try {
+      return {
+        requestId: request.requestId,
+        tabId: request.tabId,
+        url: request.url,
+        method: request.method,
+        timestamp: request.timestamp,
+        endTime: request.endTime,
+        duration: request.duration,
+        statusCode: request.statusCode,
+        correlation: request.correlation
+      };
+    } catch (error) {
+      return {
+        requestId: request.requestId,
+        url: request.url,
+        method: request.method,
+        timestamp: request.timestamp
+      };
     }
   }
 
@@ -326,10 +422,19 @@ class FioriTestBackground {
   }
 
   async saveSession(session) {
-    const result = await chrome.storage.local.get(['fioriSessions']);
-    const sessions = result.fioriSessions || {};
-    sessions[session.sessionId] = session;
-    await chrome.storage.local.set({ fioriSessions: sessions });
+    try {
+      const result = await chrome.storage.local.get(['fioriSessions']);
+      const sessions = result.fioriSessions || {};
+      
+      // Clean session data before saving
+      const cleanSession = this.cleanSessionData(session);
+      sessions[session.sessionId] = cleanSession;
+      
+      await chrome.storage.local.set({ fioriSessions: sessions });
+      this.log('Session saved successfully');
+    } catch (error) {
+      this.logError('Failed to save session:', error);
+    }
   }
 
   async getAllSessions() {

@@ -321,30 +321,42 @@
           const core = window.sap.ui.getCore();
           
           // Monitor routing events
-          const eventBus = core.getEventBus();
-          if (eventBus) {
-            eventBus.subscribe('sap.ui.core.routing', 'RouteMatched', (channelId, eventId, data) => {
-              window.postMessage({
-                type: 'UI5_ROUTE_MATCHED',
-                data: {
-                  route: data.name,
-                  arguments: data.arguments,
-                  timestamp: Date.now()
-                }
-              }, '*');
-            });
+          try {
+            const eventBus = core.getEventBus();
+            if (eventBus && typeof eventBus.subscribe === 'function') {
+              eventBus.subscribe('sap.ui.core.routing', 'RouteMatched', (channelId, eventId, data) => {
+                window.postMessage({
+                  type: 'UI5_ROUTE_MATCHED',
+                  data: {
+                    route: data.name,
+                    arguments: data.arguments,
+                    timestamp: Date.now()
+                  }
+                }, '*');
+              });
+            }
+          } catch (routingError) {
+            console.warn('Could not set up routing event monitoring:', routingError.message);
           }
 
-          // Monitor model changes
-          core.attachModelContextChange((event) => {
-            window.postMessage({
-              type: 'UI5_MODEL_CHANGE',
-              data: {
-                model: event.getParameter('model')?.getMetadata?.()?.getName(),
-                timestamp: Date.now()
-              }
-            }, '*');
-          });
+          // Monitor model changes (check if method exists first)
+          try {
+            if (typeof core.attachModelContextChange === 'function') {
+              core.attachModelContextChange((event) => {
+                window.postMessage({
+                  type: 'UI5_MODEL_CHANGE',
+                  data: {
+                    model: event.getParameter('model')?.getMetadata?.()?.getName(),
+                    timestamp: Date.now()
+                  }
+                }, '*');
+              });
+            } else {
+              console.info('attachModelContextChange not available in this UI5 version');
+            }
+          } catch (modelError) {
+            console.warn('Could not set up model change monitoring:', modelError.message);
+          }
         }
       } catch (error) {
         console.warn('Error setting up UI5 event monitoring:', error);
