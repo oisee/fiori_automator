@@ -1634,10 +1634,21 @@ class FioriTestBackground {
     // Create a clean session export with screenshot references
     const cleanSession = this.cleanSessionData(sessionData);
     
+    // Generate sequence summary for diagram generation
+    const sequenceSummary = this.generateSequenceSummary(sessionData);
+    const odataAnalysis = this.analyzeODataOperations(sessionData.networkRequests || []);
+    
     return JSON.stringify({
       formatVersion: '1.0',
       exportedAt: new Date().toISOString(),
       session: cleanSession,
+      summary: {
+        sequenceSummary: sequenceSummary,
+        odataAnalysis: odataAnalysis,
+        screenshotCount: this.countScreenshotsInSession(sessionData),
+        eventCount: sessionData.events?.length || 0,
+        networkRequestCount: sessionData.networkRequests?.length || 0
+      },
       metadata: {
         screenshotCount: this.countScreenshotsInSession(sessionData),
         eventCount: sessionData.events?.length || 0,
@@ -1665,13 +1676,227 @@ class FioriTestBackground {
     return this.collectScreenshotIds(sessionData).length;
   }
 
+  generateSequenceSummary(session) {
+    // Generate a simplified sequence for mermaid diagram
+    const summary = {
+      actors: new Set(['User']),
+      entities: new Set(),
+      interactions: [],
+      odataOperations: []
+    };
+
+    // Process events to extract key interactions
+    if (session.events) {
+      session.events.forEach((event, index) => {
+        const interaction = {
+          eventId: event.eventId,
+          type: event.type,
+          actor: 'User',
+          target: this.extractEventTarget(event),
+          timestamp: event.timestamp,
+          hasScreenshot: !!event.screenshot?.id
+        };
+
+        // Add correlated requests
+        if (event.correlatedRequests && event.correlatedRequests.length > 0) {
+          event.correlatedRequests.forEach(req => {
+            if (req.type?.includes('odata')) {
+              const entity = this.extractEntityFromUrl(req.url);
+              if (entity) {
+                summary.entities.add(entity);
+                summary.odataOperations.push({
+                  eventId: event.eventId,
+                  entity,
+                  operation: req.method,
+                  confidence: req.correlation.confidence
+                });
+              }
+            }
+          });
+        }
+
+        summary.interactions.push(interaction);
+      });
+    }
+
+    return {
+      actors: Array.from(summary.actors),
+      entities: Array.from(summary.entities),
+      interactions: summary.interactions,
+      odataOperations: summary.odataOperations
+    };
+  }
+
+  extractEventTarget(event) {
+    if (event.element?.tagName) {
+      const tag = event.element.tagName.toLowerCase();
+      const id = event.element.id ? `#${event.element.id}` : '';
+      const text = event.element.textContent ? 
+        ` ("${event.element.textContent.slice(0, 20)}")` : '';
+      return `${tag}${id}${text}`;
+    }
+    return 'unknown';
+  }
+
+  extractEntityFromUrl(url) {
+    // Extract OData entity from URL
+    const entityMatch = url.match(/\/([A-Z][a-zA-Z0-9_]+)(?:\(|$|\?)/);
+    if (entityMatch) {
+      return entityMatch[1];
+    }
+    
+    // Fallback: extract from service name
+    const serviceMatch = url.match(/\/([A-Z_]+)_SRV/);
+    if (serviceMatch) {
+      return serviceMatch[1].replace(/_SRV$/, '');
+    }
+    
+    return null;
+  }
+
+  generateMermaidDiagrams(session, sequenceSummary, odataAnalysis) {
+    let markdown = '';
+
+    // Generate Flow Diagram
+    markdown += `## Process Flow\n\n`;
+    markdown += '```mermaid\n';
+    markdown += this.generateFlowDiagram(session, sequenceSummary);
+    markdown += '```\n\n';
+
+    // Generate Sequence Diagram (if we have OData operations)
+    if (sequenceSummary.odataOperations.length > 0) {
+      markdown += `## Sequence Diagram\n\n`;
+      markdown += '```mermaid\n';
+      markdown += this.generateSequenceDiagram(session, sequenceSummary);
+      markdown += '```\n\n';
+    }
+
+    return markdown;
+  }
+
+  generateFlowDiagram(session, sequenceSummary) {
+    let diagram = 'flowchart TD\n';
+    diagram += '    Start([User starts session])\n';
+    
+    let previousNode = 'Start';
+    let nodeCounter = 1;
+
+    // Add key events as flow nodes
+    sequenceSummary.interactions.forEach((interaction, index) => {
+      const nodeId = `E${nodeCounter}`;
+      const nodeLabel = this.formatFlowNodeLabel(interaction);
+      
+      // Determine node shape based on event type
+      let nodeShape = '[]'; // rectangle
+      if (interaction.type === 'click') {
+        nodeShape = '()'; // rounded rectangle
+      } else if (interaction.type === 'input') {
+        nodeShape = '{}'; // rhombus
+      } else if (interaction.type === 'submit') {
+        nodeShape = '((';  // circle
+        nodeShape += '))';
+      }
+
+      diagram += `    ${nodeId}${nodeShape[0]}${nodeLabel}${nodeShape[1] || nodeShape[0]}\n`;
+      diagram += `    ${previousNode} --> ${nodeId}\n`;
+      
+      // Add OData operations as side nodes
+      const relatedOData = sequenceSummary.odataOperations.filter(op => op.eventId === interaction.eventId);
+      relatedOData.forEach(op => {
+        const odataNodeId = `OD${nodeCounter}`;
+        diagram += `    ${odataNodeId}[${op.operation} ${op.entity}]\n`;
+        diagram += `    ${nodeId} -.-> ${odataNodeId}\n`;
+      });
+
+      previousNode = nodeId;
+      nodeCounter++;
+    });
+
+    diagram += `    ${previousNode} --> End([Session completed])\n`;
+    
+    // Add styling
+    diagram += '\n    classDef clickEvent fill:#e1f5fe\n';
+    diagram += '    classDef inputEvent fill:#f3e5f5\n';
+    diagram += '    classDef odataEvent fill:#e8f5e8\n';
+
+    return diagram;
+  }
+
+  generateSequenceDiagram(session, sequenceSummary) {
+    let diagram = 'sequenceDiagram\n';
+    diagram += '    participant User\n';
+    diagram += '    participant UI as Fiori UI\n';
+    
+    // Add OData entities as participants
+    sequenceSummary.entities.forEach(entity => {
+      diagram += `    participant ${entity}\n`;
+    });
+
+    let eventCounter = 1;
+
+    // Generate sequence interactions
+    sequenceSummary.interactions.forEach(interaction => {
+      const relatedOData = sequenceSummary.odataOperations.filter(op => op.eventId === interaction.eventId);
+      
+      // User interaction
+      const actionLabel = this.formatSequenceAction(interaction);
+      diagram += `    User->>UI: ${eventCounter}. ${actionLabel}\n`;
+      
+      // Add OData operations
+      relatedOData.forEach(op => {
+        diagram += `    UI->>${op.entity}: ${op.operation}\n`;
+        diagram += `    ${op.entity}-->>UI: Response\n`;
+      });
+      
+      // Screenshot indicator
+      if (interaction.hasScreenshot) {
+        diagram += `    Note over User,UI: 📸 Screenshot captured\n`;
+      }
+
+      eventCounter++;
+    });
+
+    return diagram;
+  }
+
+  formatFlowNodeLabel(interaction) {
+    switch (interaction.type) {
+      case 'click':
+        return `Click ${interaction.target.split('(')[0]}`;
+      case 'input':
+        return `Input to ${interaction.target.split('(')[0]}`;
+      case 'submit':
+        return 'Submit Form';
+      case 'keyboard':
+        return 'Key Press';
+      default:
+        return interaction.type;
+    }
+  }
+
+  formatSequenceAction(interaction) {
+    switch (interaction.type) {
+      case 'click':
+        return `Click on ${interaction.target.split('(')[0]}`;
+      case 'input':
+        return `Enter data in ${interaction.target.split('(')[0]}`;
+      case 'submit':
+        return 'Submit form';
+      case 'keyboard':
+        return 'Keyboard action';
+      default:
+        return `${interaction.type} action`;
+    }
+  }
+
   generateSessionMarkdown(session) {
     const startDate = new Date(session.startTime);
     const endDate = session.endTime ? new Date(session.endTime) : null;
     const duration = session.duration ? Math.round(session.duration / 1000) : 0;
 
-    // Analyze OData operations
+    // Analyze OData operations and generate summary
     const odataAnalysis = this.analyzeODataOperations(session.networkRequests || []);
+    const sequenceSummary = this.generateSequenceSummary(session);
     
     // Generate improved session name
     const improvedSessionName = this.generateImprovedSessionName(session);
@@ -1689,6 +1914,9 @@ class FioriTestBackground {
     markdown += `- **Total Events**: ${session.events?.length || 0}\n`;
     markdown += `- **Network Requests**: ${session.networkRequests?.length || 0}\n`;
     markdown += `- **User Agent**: ${session.metadata?.userAgent || 'Unknown'}\n\n`;
+
+    // Add Mermaid Diagrams
+    markdown += this.generateMermaidDiagrams(session, sequenceSummary, odataAnalysis);
 
     // OData Analysis Section
     if (odataAnalysis.entities.length > 0 || odataAnalysis.operations.length > 0) {
@@ -1721,8 +1949,8 @@ class FioriTestBackground {
         
         markdown += `### ${index + 1}. ${this.formatEventTitle(event)} (+${relativeTime}s)\n\n`;
         
-        if (event.screenshot?.dataUrl) {
-          markdown += `![Event Screenshot](screenshots/event-${index + 1}.png)\n\n`;
+        if (event.screenshot?.id) {
+          markdown += `![Event Screenshot](${event.screenshot.id}.png)\n\n`;
         }
         
         markdown += `**Details:**\n`;
@@ -1786,6 +2014,23 @@ class FioriTestBackground {
         
         markdown += `\n`;
       });
+    }
+
+    // Add sequence summary for debugging/reference
+    if (sequenceSummary.interactions.length > 0) {
+      markdown += `## Session Summary\n\n`;
+      markdown += `### Key Interactions\n\n`;
+      markdown += `- **Actors**: ${sequenceSummary.actors.join(', ')}\n`;
+      markdown += `- **Entities**: ${sequenceSummary.entities.join(', ') || 'None detected'}\n`;
+      markdown += `- **OData Operations**: ${sequenceSummary.odataOperations.length}\n\n`;
+
+      if (sequenceSummary.odataOperations.length > 0) {
+        markdown += `### OData Operations Details\n\n`;
+        sequenceSummary.odataOperations.forEach((op, index) => {
+          markdown += `${index + 1}. **Event ${op.eventId}**: ${op.operation} on ${op.entity} (${op.confidence}% confidence)\n`;
+        });
+        markdown += `\n`;
+      }
     }
 
     return markdown;
