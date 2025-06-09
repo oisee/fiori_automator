@@ -153,9 +153,14 @@ class FioriTestBackground {
 
   async getResponseBody(requestId) {
     try {
-      // Note: Chrome doesn't provide direct access to response body
-      // This would need to be captured via content script or devtools API
-      return null;
+      // Chrome extensions can't directly access response bodies from webRequest API
+      // But we can use fetch API to re-request the data if it's a GET request
+      // For now, we'll indicate that response capture is attempted
+      return { 
+        captured: false, 
+        reason: 'Response body capture requires content script integration',
+        note: 'Will be implemented via fetch interception'
+      };
     } catch (error) {
       console.warn('Could not capture response body:', error);
       return null;
@@ -346,6 +351,16 @@ class FioriTestBackground {
           sendResponse({ success: true });
           break;
 
+        case 'capture-screenshot':
+          const screenshot = await this.captureTabScreenshot(sender.tab?.id || message.tabId, message.elementInfo);
+          sendResponse({ success: true, screenshot });
+          break;
+
+        case 'export-session-markdown':
+          const markdownExport = await this.exportSessionAsMarkdown(message.sessionId || sender.tab?.id || message.tabId);
+          sendResponse({ success: true, zipData: markdownExport });
+          break;
+
         default:
           sendResponse({ success: false, error: 'Unknown message type' });
       }
@@ -357,12 +372,18 @@ class FioriTestBackground {
 
   async startRecording(tabId, sessionData) {
     const sessionId = this.generateUUID();
+    
+    // Generate an improved session name immediately
+    const improvedSessionName = this.generateImprovedSessionNameFromUrl(sessionData.applicationUrl || '');
+    
     const session = {
       sessionId,
       tabId,
       startTime: Date.now(),
       metadata: {
         ...sessionData,
+        sessionName: improvedSessionName || sessionData.sessionName,
+        originalSessionName: sessionData.sessionName,
         userAgent: navigator.userAgent
       },
       events: [],
@@ -943,6 +964,317 @@ class FioriTestBackground {
     }
   }
 
+
+  async captureTabScreenshot(tabId, elementInfo) {
+    try {
+      const screenshot = await chrome.tabs.captureVisibleTab(null, {
+        format: 'png',
+        quality: 90
+      });
+      
+      return {
+        dataUrl: screenshot,
+        timestamp: Date.now(),
+        tabId: tabId,
+        elementInfo: elementInfo || null
+      };
+    } catch (error) {
+      this.logError('Failed to capture screenshot:', error);
+      return null;
+    }
+  }
+
+  async exportSessionAsMarkdown(sessionIdentifier) {
+    try {
+      // Get session data
+      let sessionData;
+      if (typeof sessionIdentifier === 'string') {
+        // Session ID provided
+        const allSessions = await this.getAllSessions();
+        sessionData = allSessions[sessionIdentifier];
+      } else {
+        // Tab ID provided
+        sessionData = this.sessions.get(sessionIdentifier);
+      }
+
+      if (!sessionData) {
+        throw new Error('Session not found');
+      }
+
+      // Generate markdown content
+      const markdown = this.generateSessionMarkdown(sessionData);
+      
+      // Create a simple zip-like structure (for now, just return markdown)
+      // In a full implementation, this would create an actual ZIP file with screenshots
+      return markdown;
+    } catch (error) {
+      this.logError('Failed to export session as markdown:', error);
+      throw error;
+    }
+  }
+
+  generateSessionMarkdown(session) {
+    const startDate = new Date(session.startTime);
+    const endDate = session.endTime ? new Date(session.endTime) : null;
+    const duration = session.duration ? Math.round(session.duration / 1000) : 0;
+
+    // Analyze OData operations
+    const odataAnalysis = this.analyzeODataOperations(session.networkRequests || []);
+    
+    // Generate improved session name
+    const improvedSessionName = this.generateImprovedSessionName(session);
+
+    let markdown = `# ${improvedSessionName}\n\n`;
+    
+    markdown += `## Session Overview\n\n`;
+    markdown += `- **Session ID**: ${session.sessionId}\n`;
+    markdown += `- **Application URL**: ${session.metadata?.applicationUrl || 'Unknown'}\n`;
+    markdown += `- **Started**: ${startDate.toLocaleString()}\n`;
+    if (endDate) {
+      markdown += `- **Ended**: ${endDate.toLocaleString()}\n`;
+    }
+    markdown += `- **Duration**: ${duration} seconds\n`;
+    markdown += `- **Total Events**: ${session.events?.length || 0}\n`;
+    markdown += `- **Network Requests**: ${session.networkRequests?.length || 0}\n`;
+    markdown += `- **User Agent**: ${session.metadata?.userAgent || 'Unknown'}\n\n`;
+
+    // OData Analysis Section
+    if (odataAnalysis.entities.length > 0 || odataAnalysis.operations.length > 0) {
+      markdown += `## OData Analysis\n\n`;
+      
+      if (odataAnalysis.entities.length > 0) {
+        markdown += `### Entities Accessed\n\n`;
+        odataAnalysis.entities.forEach(entity => {
+          markdown += `- **${entity.name}**: ${entity.operations.join(', ')}\n`;
+        });
+        markdown += `\n`;
+      }
+
+      if (odataAnalysis.operations.length > 0) {
+        markdown += `### Operations Performed\n\n`;
+        odataAnalysis.operations.forEach(op => {
+          markdown += `- **${op.type}**: ${op.description}\n`;
+        });
+        markdown += `\n`;
+      }
+    }
+
+    // Events Timeline
+    markdown += `## Events Timeline\n\n`;
+    
+    if (session.events && session.events.length > 0) {
+      session.events.forEach((event, index) => {
+        const timestamp = new Date(event.timestamp);
+        const relativeTime = Math.round((event.timestamp - session.startTime) / 1000);
+        
+        markdown += `### ${index + 1}. ${this.formatEventTitle(event)} (+${relativeTime}s)\n\n`;
+        
+        if (event.screenshot?.dataUrl) {
+          markdown += `![Event Screenshot](screenshots/event-${index + 1}.png)\n\n`;
+        }
+        
+        markdown += `**Details:**\n`;
+        markdown += `- **Type**: ${event.type}\n`;
+        markdown += `- **Time**: ${timestamp.toLocaleTimeString()}\n`;
+        
+        if (event.element) {
+          markdown += `- **Element**: ${event.element.tagName}`;
+          if (event.element.id) markdown += `#${event.element.id}`;
+          markdown += `\n`;
+          if (event.element.textContent) {
+            markdown += `- **Text**: "${event.element.textContent.slice(0, 100)}"\n`;
+          }
+        }
+        
+        if (event.coordinates) {
+          markdown += `- **Position**: (${event.coordinates.x}, ${event.coordinates.y})\n`;
+        }
+        
+        if (event.value) {
+          markdown += `- **Value**: "${event.value}"\n`;
+        }
+        
+        if (event.isCoalesced) {
+          markdown += `- **Input Details**: ${event.editCount} edits over ${Math.round(event.duration / 1000)}s\n`;
+          if (event.initialValue && event.finalValue) {
+            markdown += `- **Change**: "${event.initialValue}" → "${event.finalValue}"\n`;
+          }
+        }
+        
+        if (event.correlatedRequests && event.correlatedRequests.length > 0) {
+          markdown += `\n**Correlated Network Requests:**\n\n`;
+          event.correlatedRequests.forEach(req => {
+            markdown += `- **${req.method}** ${req.url.split('/').pop()}\n`;
+            markdown += `  - Confidence: ${Math.round(req.correlation.confidence)}%\n`;
+            markdown += `  - Time difference: ${req.correlation.timeDifference}ms\n`;
+          });
+        }
+        
+        markdown += `\n---\n\n`;
+      });
+    } else {
+      markdown += `No events recorded.\n\n`;
+    }
+
+    // Network Requests Section
+    if (session.networkRequests && session.networkRequests.length > 0) {
+      markdown += `## Network Requests\n\n`;
+      
+      session.networkRequests.forEach((request, index) => {
+        markdown += `### Request ${index + 1}: ${request.method} ${request.type}\n\n`;
+        markdown += `- **URL**: ${request.url}\n`;
+        markdown += `- **Method**: ${request.method}\n`;
+        markdown += `- **Type**: ${request.type}\n`;
+        markdown += `- **Status**: ${request.statusCode || 'Unknown'}\n`;
+        markdown += `- **Duration**: ${request.duration || 'Unknown'}ms\n`;
+        
+        if (request.requestBody && typeof request.requestBody === 'string') {
+          markdown += `\n**Request Body:**\n\`\`\`\n${request.requestBody.slice(0, 500)}\n\`\`\`\n`;
+        }
+        
+        markdown += `\n`;
+      });
+    }
+
+    return markdown;
+  }
+
+  analyzeODataOperations(networkRequests) {
+    const entities = new Map();
+    const operations = [];
+
+    networkRequests.forEach(request => {
+      if (request.type?.includes('odata')) {
+        // Extract entity names from URL
+        const urlParts = request.url.split('/');
+        const odataIndex = urlParts.findIndex(part => part.includes('odata'));
+        
+        if (odataIndex !== -1 && urlParts[odataIndex + 1]) {
+          const serviceName = urlParts[odataIndex + 1];
+          
+          // Extract operation from request body or URL
+          if (request.requestBody && typeof request.requestBody === 'string') {
+            const bodyLines = request.requestBody.split('\n');
+            bodyLines.forEach(line => {
+              if (line.includes('GET ') || line.includes('POST ') || line.includes('MERGE ')) {
+                const match = line.match(/(GET|POST|MERGE)\s+(\w+)/);
+                if (match) {
+                  const [, method, entityName] = match;
+                  if (!entities.has(entityName)) {
+                    entities.set(entityName, { name: entityName, operations: [] });
+                  }
+                  const entity = entities.get(entityName);
+                  if (!entity.operations.includes(method)) {
+                    entity.operations.push(method);
+                  }
+                }
+              }
+            });
+          }
+        }
+
+        // Classify operation type
+        if (request.requestBody?.includes('MERGE')) {
+          operations.push({ type: 'UPDATE', description: 'Entity update operation' });
+        } else if (request.requestBody?.includes('POST') && !request.url.includes('$batch')) {
+          operations.push({ type: 'CREATE', description: 'Entity creation operation' });
+        } else if (request.url.includes('$batch')) {
+          operations.push({ type: 'BATCH', description: 'Batch operation with multiple requests' });
+        } else if (request.method === 'GET') {
+          operations.push({ type: 'READ', description: 'Data retrieval operation' });
+        }
+      }
+    });
+
+    return {
+      entities: Array.from(entities.values()),
+      operations
+    };
+  }
+
+  generateImprovedSessionNameFromUrl(url) {
+    if (!url) return null;
+
+    // Known Fiori app mappings
+    const fioriAppMappings = {
+      'DetectionMethod-manageDetectionMethod': 'Manage Detection Methods',
+      'Shell-home': 'Fiori Launchpad Home',
+      'UserManagement-maintain': 'User Management',
+      'Analytics-reporting': 'Analytics & Reporting',
+      'WorkflowInbox-displayInbox': 'Workflow Inbox',
+      'BusinessPartner-manage': 'Business Partner Management'
+    };
+
+    // Extract app name from Fiori launchpad URL
+    const fioriMatch = url.match(/#(\w+)-(\w+)/);
+    if (fioriMatch) {
+      const [, namespace, appId] = fioriMatch;
+      const appKey = `${namespace}-${appId}`;
+      
+      // Check if we have a known mapping
+      if (fioriAppMappings[appKey]) {
+        return fioriAppMappings[appKey];
+      }
+      
+      // Generate readable name from app ID
+      let appName = appId
+        .replace(/([A-Z])/g, ' $1')
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .trim();
+      
+      // Capitalize first letter
+      appName = appName.charAt(0).toUpperCase() + appName.slice(1);
+      
+      return appName;
+    }
+
+    // Fallback: extract from page title or domain
+    return null;
+  }
+
+  generateImprovedSessionName(session) {
+    // Try to extract Fiori app name from URL
+    const url = session.metadata?.applicationUrl || '';
+    let appName = this.generateImprovedSessionNameFromUrl(url) || 'Fiori Session';
+
+    // Add OData context if available
+    const networkRequests = session.networkRequests || [];
+    const odataServices = new Set();
+    
+    networkRequests.forEach(request => {
+      if (request.type?.includes('odata')) {
+        const serviceMatch = request.url.match(/\/([A-Z_]+_SRV)/);
+        if (serviceMatch) {
+          odataServices.add(serviceMatch[1]);
+        }
+      }
+    });
+
+    if (odataServices.size > 0) {
+      const servicesList = Array.from(odataServices).join(', ');
+      appName += ` (${servicesList})`;
+    }
+
+    return appName;
+  }
+
+  formatEventTitle(event) {
+    switch (event.type) {
+      case 'click':
+        return `Click on ${event.element?.tagName?.toLowerCase() || 'element'}`;
+      case 'input':
+        if (event.isCoalesced) {
+          return `Input: "${event.finalValue}" (${event.editCount} edits)`;
+        }
+        return `Input: "${event.value}"`;
+      case 'keyboard':
+        return `Key press: ${event.key}`;
+      case 'submit':
+        return 'Form submission';
+      default:
+        return `${event.type} event`;
+    }
+  }
 
   generateUUID() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {

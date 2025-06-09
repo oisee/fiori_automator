@@ -162,11 +162,13 @@ class FioriTestCapture {
         x: event.clientX,
         y: event.clientY,
         elementX: rect.left,
-        elementY: rect.top
+        elementY: rect.top,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight
       },
       element: await this.getElementInfo(element),
       ui5Context: this.getUI5ElementContext(element),
-      screenshot: await this.captureScreenshot(),
+      screenshot: await this.captureElementScreenshot(element),
       modifiers: {
         ctrlKey: event.ctrlKey,
         shiftKey: event.shiftKey,
@@ -617,6 +619,87 @@ class FioriTestCapture {
     const indicator = document.getElementById('fiori-recording-indicator');
     if (indicator) {
       indicator.remove();
+    }
+  }
+
+  async captureElementScreenshot(element) {
+    try {
+      // Capture both full page screenshot and element info
+      const rect = element.getBoundingClientRect();
+      const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
+      const scrollY = window.pageYOffset || document.documentElement.scrollTop;
+      
+      // Get element screenshot via background script
+      const response = await chrome.runtime.sendMessage({
+        type: 'capture-screenshot',
+        elementInfo: {
+          x: rect.left + scrollX,
+          y: rect.top + scrollY,
+          width: rect.width,
+          height: rect.height,
+          visible: this.isElementVisible(element)
+        }
+      });
+      
+      if (response && response.success) {
+        return {
+          dataUrl: response.screenshot,
+          timestamp: Date.now(),
+          elementBounds: {
+            x: rect.left + scrollX,
+            y: rect.top + scrollY,
+            width: rect.width,
+            height: rect.height
+          },
+          viewportSize: {
+            width: window.innerWidth,
+            height: window.innerHeight
+          },
+          pageSize: {
+            width: document.documentElement.scrollWidth,
+            height: document.documentElement.scrollHeight
+          }
+        };
+      }
+      
+      return null;
+    } catch (error) {
+      console.warn('Failed to capture element screenshot:', error);
+      return null;
+    }
+  }
+
+  isElementVisible(element) {
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    
+    return (
+      rect.width > 0 &&
+      rect.height > 0 &&
+      style.visibility !== 'hidden' &&
+      style.display !== 'none' &&
+      rect.top < window.innerHeight &&
+      rect.bottom > 0 &&
+      rect.left < window.innerWidth &&
+      rect.right > 0
+    );
+  }
+
+  async captureScreenshot() {
+    try {
+      // Request full page screenshot from background script
+      const response = await chrome.runtime.sendMessage({
+        type: 'capture-screenshot'
+      });
+      
+      if (response && response.success) {
+        return response.screenshot;
+      }
+      
+      return null;
+    } catch (error) {
+      console.warn('Failed to capture screenshot:', error);
+      return null;
     }
   }
 

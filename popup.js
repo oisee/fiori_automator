@@ -74,6 +74,12 @@ class FioriTestPopup {
     document.getElementById('helpBtn').addEventListener('click', () => this.openHelp());
     document.getElementById('popoutBtn').addEventListener('click', () => this.openInWindow());
     document.getElementById('exportBtn').addEventListener('click', () => this.exportSession());
+    
+    // Add markdown export button if it exists
+    const markdownExportBtn = document.getElementById('exportMarkdownBtn');
+    if (markdownExportBtn) {
+      markdownExportBtn.addEventListener('click', () => this.exportSessionAsMarkdown());
+    }
 
     // Listen for background script messages
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -579,6 +585,44 @@ class FioriTestPopup {
     } catch (error) {
       console.error('Export failed:', error);
       this.showError('Export failed');
+    }
+  }
+
+  async exportSessionAsMarkdown() {
+    try {
+      if (!this.currentState || !this.currentState.sessionId) {
+        this.showError('No session data to export');
+        return;
+      }
+
+      this.showLoading('Generating markdown export...');
+
+      const response = await chrome.runtime.sendMessage({
+        type: 'export-session-markdown',
+        tabId: this.currentTab.id,
+        sessionId: this.currentState.sessionId
+      });
+
+      if (response && response.success) {
+        // Create and download the zip file
+        const blob = new Blob([response.zipData], { type: 'application/zip' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `fiori-session-${this.currentState.sessionId}-export.zip`;
+        a.click();
+        
+        URL.revokeObjectURL(url);
+        this.showSuccess('Markdown export completed!');
+      } else {
+        throw new Error(response?.error || 'Export failed');
+      }
+    } catch (error) {
+      console.error('Markdown export failed:', error);
+      this.showError('Markdown export failed');
+    } finally {
+      this.hideLoading();
     }
   }
 
