@@ -62,6 +62,10 @@ class SessionsManager {
       this.exportSessionAsMarkdown(this.selectedSession);
     });
 
+    document.getElementById('modalExportZipBtn').addEventListener('click', () => {
+      this.exportSessionAsZip(this.selectedSession);
+    });
+
     document.getElementById('modalReplayBtn').addEventListener('click', () => {
       this.replaySession(this.selectedSession);
     });
@@ -333,6 +337,40 @@ class SessionsManager {
     } catch (error) {
       console.error('Markdown export failed:', error);
       this.showNotification('Markdown export failed', 'error');
+    }
+  }
+
+  async exportSessionAsZip(session) {
+    try {
+      this.showNotification('Creating ZIP export with screenshots...', 'info');
+      
+      const response = await chrome.runtime.sendMessage({
+        type: 'export-session-zip',
+        sessionId: session.sessionId
+      });
+
+      if (response && response.success) {
+        // Create ZIP-like structure download
+        const zipContent = response.zipData;
+        const blob = new Blob([zipContent], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        // Use semantic filename from response or fallback
+        a.download = response.filename || `fiori-session-${session.sessionId}-with-screenshots.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        URL.revokeObjectURL(url);
+        this.showNotification(`ZIP export completed! ${response.screenshotCount || 0} screenshots included.`);
+      } else {
+        throw new Error(response?.error || 'Export failed');
+      }
+    } catch (error) {
+      console.error('ZIP export failed:', error);
+      this.showNotification('ZIP export failed', 'error');
     }
   }
 

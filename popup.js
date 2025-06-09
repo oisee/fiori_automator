@@ -81,6 +81,18 @@ class FioriTestPopup {
       markdownExportBtn.addEventListener('click', () => this.exportSessionAsMarkdown());
     }
 
+    // Add ZIP export button if it exists
+    const zipExportBtn = document.getElementById('exportZipBtn');
+    if (zipExportBtn) {
+      zipExportBtn.addEventListener('click', () => this.exportSessionAsZip());
+    }
+
+    // Add manual screenshot button if it exists
+    const manualScreenshotBtn = document.getElementById('manualScreenshotBtn');
+    if (manualScreenshotBtn) {
+      manualScreenshotBtn.addEventListener('click', () => this.captureManualScreenshot());
+    }
+
     // Listen for background script messages
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       this.handleMessage(message, sender, sendResponse);
@@ -629,6 +641,46 @@ class FioriTestPopup {
     }
   }
 
+  async exportSessionAsZip() {
+    try {
+      if (!this.currentState || !this.currentState.sessionId) {
+        this.showError('No session data to export');
+        return;
+      }
+
+      this.showLoading('Creating ZIP export with screenshots...');
+
+      const response = await chrome.runtime.sendMessage({
+        type: 'export-session-zip',
+        tabId: this.currentTab.id,
+        sessionId: this.currentState.sessionId
+      });
+
+      if (response && response.success) {
+        // Create ZIP-like structure download
+        const zipContent = response.zipData;
+        const blob = new Blob([zipContent], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        // Use semantic filename from response or fallback
+        a.download = response.filename || `fiori-session-${this.currentState.sessionId}-with-screenshots.json`;
+        a.click();
+        
+        URL.revokeObjectURL(url);
+        this.showSuccess(`ZIP export completed! ${response.screenshotCount || 0} screenshots included.`);
+      } else {
+        throw new Error(response?.error || 'Export failed');
+      }
+    } catch (error) {
+      console.error('ZIP export failed:', error);
+      this.showError('ZIP export failed');
+    } finally {
+      this.hideLoading();
+    }
+  }
+
   showLoading(message) {
     const overlay = document.getElementById('loadingOverlay');
     const text = overlay.querySelector('.loading-text');
@@ -646,6 +698,42 @@ class FioriTestPopup {
 
   showError(message) {
     this.showNotification(message, 'error');
+  }
+
+  async captureManualScreenshot() {
+    try {
+      this.showLoading('Capturing screenshot...');
+
+      const response = await chrome.runtime.sendMessage({
+        type: 'capture-screenshot',
+        tabId: this.currentTab.id
+      });
+
+      if (response && response.success && response.screenshot) {
+        // Create download link for the screenshot
+        const dataUrl = response.screenshot.dataUrl;
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        
+        // Generate filename with timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        link.download = `fiori-manual-screenshot-${timestamp}.png`;
+        
+        // Trigger download
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        this.showSuccess('Screenshot captured and downloaded!');
+      } else {
+        throw new Error(response?.error || 'Failed to capture screenshot');
+      }
+    } catch (error) {
+      console.error('Manual screenshot failed:', error);
+      this.showError('Failed to capture screenshot');
+    } finally {
+      this.hideLoading();
+    }
   }
 
   showNotification(message, type) {

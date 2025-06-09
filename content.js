@@ -1,14 +1,16 @@
 // Content script for Fiori Test Automation System
 // Captures DOM interactions, SAPUI5 context, and coordinates with background script
 
-class FioriTestCapture {
-  constructor() {
-    this.isRecording = false;
-    this.eventQueue = [];
-    this.lastScreenshot = null;
-    this.ui5Context = null;
-    this.init();
-  }
+// Only declare the class if it doesn't already exist
+if (!window.FioriTestCapture) {
+  window.FioriTestCapture = class {
+    constructor() {
+      this.isRecording = false;
+      this.eventQueue = [];
+      this.lastScreenshot = null;
+      this.ui5Context = null;
+      this.init();
+    }
 
   init() {
     this.setupDebugMode();
@@ -48,6 +50,19 @@ class FioriTestCapture {
     document.addEventListener('input', (event) => {
       if (this.isRecording) {
         this.captureInputEvent(event);
+      }
+    }, true);
+
+    // Focus events for editing start/end
+    document.addEventListener('focusin', (event) => {
+      if (this.isRecording && this.isFormElement(event.target)) {
+        this.captureEditingStart(event);
+      }
+    }, true);
+
+    document.addEventListener('focusout', (event) => {
+      if (this.isRecording && this.isFormElement(event.target)) {
+        this.captureEditingEnd(event);
       }
     }, true);
 
@@ -156,8 +171,8 @@ class FioriTestCapture {
     const element = event.target;
     const rect = element.getBoundingClientRect();
     
-    // Capture screenshot asynchronously (don't block the event)
-    const screenshotPromise = this.captureElementScreenshot(element);
+    // Capture screenshot immediately for click events
+    const screenshot = await this.captureEventScreenshot(element, 'click');
     
     const eventData = {
       type: 'click',
@@ -176,32 +191,27 @@ class FioriTestCapture {
         shiftKey: event.shiftKey,
         altKey: event.altKey,
         metaKey: event.metaKey
-      }
+      },
+      screenshot: screenshot
     };
 
-    // Add screenshot when available (async)
-    screenshotPromise.then(screenshot => {
-      if (screenshot) {
-        eventData.screenshot = screenshot;
-        this.log('Screenshot captured for click event:', screenshot);
-      }
-    }).catch(error => {
-      this.log('Screenshot capture failed for click event:', error);
-    });
-
-    this.log('Click captured:', eventData);
+    this.log('Click captured with screenshot:', eventData);
     await this.sendEventToBackground(eventData);
   }
 
   async captureInputEvent(event) {
     const element = event.target;
     
+    // Capture screenshot for input events
+    const screenshot = await this.captureEventScreenshot(element, 'input');
+    
     const eventData = {
       type: 'input',
       element: await this.getElementInfo(element),
       value: element.value,
       inputType: event.inputType,
-      ui5Context: this.getUI5ElementContext(element)
+      ui5Context: this.getUI5ElementContext(element),
+      screenshot: screenshot
     };
 
     await this.sendEventToBackground(eventData);
@@ -216,13 +226,17 @@ class FioriTestCapture {
       formObject[key] = value;
     }
 
+    // Capture screenshot for form submissions
+    const screenshot = await this.captureEventScreenshot(form, 'submit');
+
     const eventData = {
       type: 'submit',
       element: await this.getElementInfo(form),
       formData: formObject,
       action: form.action,
       method: form.method,
-      ui5Context: this.getUI5ElementContext(form)
+      ui5Context: this.getUI5ElementContext(form),
+      screenshot: screenshot
     };
 
     await this.sendEventToBackground(eventData);
@@ -232,6 +246,9 @@ class FioriTestCapture {
     // Only capture special keys and shortcuts
     if (event.ctrlKey || event.altKey || event.metaKey || 
         ['Enter', 'Escape', 'Tab', 'F1', 'F2', 'F3', 'F4'].includes(event.key)) {
+      
+      // Capture screenshot for important keyboard events
+      const screenshot = await this.captureEventScreenshot(event.target, 'keyboard');
       
       const eventData = {
         type: 'keyboard',
@@ -244,7 +261,8 @@ class FioriTestCapture {
           altKey: event.altKey,
           metaKey: event.metaKey
         },
-        ui5Context: this.getUI5ElementContext(event.target)
+        ui5Context: this.getUI5ElementContext(event.target),
+        screenshot: screenshot
       };
 
       await this.sendEventToBackground(eventData);
@@ -267,6 +285,49 @@ class FioriTestCapture {
     await this.sendEventToBackground(eventData);
   }
 
+  async captureEditingStart(event) {
+    const element = event.target;
+    
+    // Capture screenshot at start of editing
+    const screenshot = await this.captureEventScreenshot(element, 'editing_start');
+    
+    const eventData = {
+      type: 'editing_start',
+      element: await this.getElementInfo(element),
+      initialValue: element.value || element.textContent || '',
+      ui5Context: this.getUI5ElementContext(element),
+      screenshot: screenshot
+    };
+
+    this.log('Editing started with screenshot:', eventData);
+    await this.sendEventToBackground(eventData);
+  }
+
+  async captureEditingEnd(event) {
+    const element = event.target;
+    
+    // Capture screenshot at end of editing
+    const screenshot = await this.captureEventScreenshot(element, 'editing_end');
+    
+    const eventData = {
+      type: 'editing_end',
+      element: await this.getElementInfo(element),
+      finalValue: element.value || element.textContent || '',
+      ui5Context: this.getUI5ElementContext(element),
+      screenshot: screenshot
+    };
+
+    this.log('Editing ended with screenshot:', eventData);
+    await this.sendEventToBackground(eventData);
+  }
+
+  isFormElement(element) {
+    const formElements = ['INPUT', 'TEXTAREA', 'SELECT'];
+    return formElements.includes(element.tagName) || 
+           element.contentEditable === 'true' ||
+           element.hasAttribute('contenteditable');
+  }
+
   async captureFileUpload(event) {
     const files = Array.from(event.target.files).map(file => ({
       name: file.name,
@@ -275,11 +336,15 @@ class FioriTestCapture {
       lastModified: file.lastModified
     }));
 
+    // Capture screenshot for file uploads
+    const screenshot = await this.captureEventScreenshot(event.target, 'file_upload');
+
     const eventData = {
       type: 'file_upload',
       element: await this.getElementInfo(event.target),
       files,
-      ui5Context: this.getUI5ElementContext(event.target)
+      ui5Context: this.getUI5ElementContext(event.target),
+      screenshot: screenshot
     };
 
     await this.sendEventToBackground(eventData);
@@ -1101,7 +1166,7 @@ class FioriTestCapture {
     }
   }
 
-  async captureElementScreenshot(element) {
+  async captureEventScreenshot(element, eventType) {
     try {
       // Skip screenshot capture if disabled
       if (!this.shouldCaptureScreenshots()) {
@@ -1122,19 +1187,24 @@ class FioriTestCapture {
         tagName: element.tagName,
         id: element.id,
         className: element.className,
-        textContent: element.textContent?.slice(0, 100)
+        textContent: element.textContent?.slice(0, 100),
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight
       };
       
-      // Get element screenshot via background script
+      // Get screenshot via background script with event type
       const response = await chrome.runtime.sendMessage({
         type: 'capture-screenshot',
-        elementInfo: elementInfo
+        elementInfo: elementInfo,
+        eventType: eventType
       });
       
-      if (response && response.success) {
+      if (response && response.success && response.screenshot) {
         return {
-          dataUrl: response.screenshot.dataUrl,
+          id: response.screenshot.id,
+          filename: `${response.screenshot.id}.png`,
           timestamp: response.screenshot.timestamp,
+          eventType: eventType,
           elementBounds: elementInfo,
           viewportSize: {
             width: window.innerWidth,
@@ -1151,9 +1221,14 @@ class FioriTestCapture {
       
       return null;
     } catch (error) {
-      console.warn('Failed to capture element screenshot:', error);
+      console.warn('Failed to capture event screenshot:', error);
       return null;
     }
+  }
+
+  async captureElementScreenshot(element) {
+    // Legacy method - use the new event-based method
+    return await this.captureEventScreenshot(element, 'legacy');
   }
 
   shouldCaptureScreenshots() {
@@ -1253,11 +1328,16 @@ class FioriTestCapture {
   }
 }
 
-// Initialize content script
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    new FioriTestCapture();
-  });
-} else {
-  new FioriTestCapture();
+  }; // End of FioriTestCapture class
+}
+
+// Initialize content script only if not already initialized
+if (!window.fioriTestCaptureInstance) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      window.fioriTestCaptureInstance = new window.FioriTestCapture();
+    });
+  } else {
+    window.fioriTestCaptureInstance = new window.FioriTestCapture();
+  }
 }

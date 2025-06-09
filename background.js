@@ -5,6 +5,7 @@ class FioriTestBackground {
   constructor() {
     this.sessions = new Map();
     this.networkRequests = new Map();
+    this.screenshots = new Map(); // Store screenshots by ID
     this.debug = false;
     this.init();
   }
@@ -352,7 +353,11 @@ class FioriTestBackground {
           break;
 
         case 'capture-screenshot':
-          const screenshot = await this.captureTabScreenshot(sender.tab?.id || message.tabId, message.elementInfo);
+          const screenshot = await this.captureTabScreenshot(
+            sender.tab?.id || message.tabId, 
+            message.elementInfo, 
+            message.eventType || 'manual'
+          );
           sendResponse({ success: true, screenshot });
           break;
 
@@ -362,6 +367,16 @@ class FioriTestBackground {
             success: true, 
             zipData: exportResult.content, 
             filename: exportResult.filename 
+          });
+          break;
+
+        case 'export-session-zip':
+          const zipResult = await this.exportSessionAsZip(message.sessionId || sender.tab?.id || message.tabId);
+          sendResponse({ 
+            success: true, 
+            zipData: zipResult.content, 
+            filename: zipResult.filename,
+            contentType: 'application/zip'
           });
           break;
 
@@ -773,7 +788,13 @@ class FioriTestBackground {
           url: req.url,
           method: req.method,
           correlation: req.correlation
-        })) || []
+        })) || [],
+        screenshot: event.screenshot ? {
+          id: event.screenshot.id,
+          filename: event.screenshot.filename,
+          timestamp: event.screenshot.timestamp,
+          eventType: event.screenshot.eventType
+        } : null
       };
 
       // Add coalescing-specific fields if present
@@ -1066,7 +1087,7 @@ class FioriTestBackground {
   }
 
 
-  async captureTabScreenshot(tabId, elementInfo) {
+  async captureTabScreenshot(tabId, elementInfo, eventType = null) {
     try {
       // Get the current tab info
       const tab = await chrome.tabs.get(tabId);
@@ -1079,20 +1100,58 @@ class FioriTestBackground {
         quality: 90
       });
       
-      return {
+      // Generate unique screenshot ID
+      const screenshotId = this.generateScreenshotId(eventType);
+      
+      const screenshotData = {
+        id: screenshotId,
         dataUrl: screenshot,
         timestamp: Date.now(),
         tabId: tabId,
         elementInfo: elementInfo || null,
+        eventType: eventType,
         pageInfo: {
           url: tab.url,
           title: tab.title,
           windowId: tab.windowId
+        },
+        viewport: {
+          width: elementInfo?.viewportWidth || null,
+          height: elementInfo?.viewportHeight || null
         }
       };
+
+      // Store screenshot in memory for session export
+      this.screenshots.set(screenshotId, screenshotData);
+      
+      // Clean up old screenshots (keep last 100 per tab)
+      this.cleanupOldScreenshots(tabId);
+      
+      return screenshotData;
     } catch (error) {
       this.logError('Failed to capture screenshot:', error);
       return null;
+    }
+  }
+
+  generateScreenshotId(eventType = 'manual') {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2, 8);
+    return `screenshot_${eventType || 'event'}_${timestamp}_${random}`;
+  }
+
+  cleanupOldScreenshots(tabId) {
+    // Keep only the last 100 screenshots per tab to prevent memory issues
+    const tabScreenshots = Array.from(this.screenshots.values())
+      .filter(s => s.tabId === tabId)
+      .sort((a, b) => b.timestamp - a.timestamp);
+    
+    if (tabScreenshots.length > 100) {
+      const toDelete = tabScreenshots.slice(100);
+      toDelete.forEach(screenshot => {
+        this.screenshots.delete(screenshot.id);
+      });
+      this.log(`Cleaned up ${toDelete.length} old screenshots for tab ${tabId}`);
     }
   }
 
@@ -1119,8 +1178,6 @@ class FioriTestBackground {
       // Generate semantic filename
       const filename = this.generateSemanticFilename(sessionData, 'md');
       
-      // Create a simple zip-like structure (for now, just return markdown)
-      // In a full implementation, this would create an actual ZIP file with screenshots
       return {
         content: markdown,
         filename: filename
@@ -1129,6 +1186,105 @@ class FioriTestBackground {
       this.logError('Failed to export session as markdown:', error);
       throw error;
     }
+  }
+
+  async exportSessionAsZip(sessionIdentifier) {
+    try {
+      // Get session data
+      let sessionData;
+      if (typeof sessionIdentifier === 'string') {
+        // Session ID provided
+        const allSessions = await this.getAllSessions();
+        sessionData = allSessions[sessionIdentifier];
+      } else {
+        // Tab ID provided
+        sessionData = this.sessions.get(sessionIdentifier);
+      }
+
+      if (!sessionData) {
+        throw new Error('Session not found');
+      }
+
+      // Generate JSON content with screenshot references
+      const jsonData = this.generateSessionJSON(sessionData);
+      
+      // Collect all screenshots referenced in the session
+      const screenshotIds = this.collectScreenshotIds(sessionData);
+      const screenshots = new Map();
+      
+      for (const screenshotId of screenshotIds) {
+        const screenshot = this.screenshots.get(screenshotId);
+        if (screenshot) {
+          screenshots.set(screenshotId, screenshot);
+        }
+      }
+
+      // Create a simple archive structure
+      const archive = {
+        'session.json': jsonData,
+        screenshots: {}
+      };
+
+      // Add screenshots to archive
+      for (const [id, screenshot] of screenshots) {
+        const filename = `${id}.png`;
+        archive.screenshots[filename] = {
+          data: screenshot.dataUrl,
+          metadata: {
+            timestamp: screenshot.timestamp,
+            eventType: screenshot.eventType,
+            elementInfo: screenshot.elementInfo
+          }
+        };
+      }
+
+      // Generate semantic filename
+      const filename = this.generateSemanticFilename(sessionData, 'zip');
+      
+      return {
+        content: JSON.stringify(archive, null, 2),
+        filename: filename,
+        screenshotCount: screenshots.size
+      };
+    } catch (error) {
+      this.logError('Failed to export session as ZIP:', error);
+      throw error;
+    }
+  }
+
+  generateSessionJSON(sessionData) {
+    // Create a clean session export with screenshot references
+    const cleanSession = this.cleanSessionData(sessionData);
+    
+    return JSON.stringify({
+      formatVersion: '1.0',
+      exportedAt: new Date().toISOString(),
+      session: cleanSession,
+      metadata: {
+        screenshotCount: this.countScreenshotsInSession(sessionData),
+        eventCount: sessionData.events?.length || 0,
+        networkRequestCount: sessionData.networkRequests?.length || 0
+      }
+    }, null, 2);
+  }
+
+  collectScreenshotIds(sessionData) {
+    const screenshotIds = new Set();
+    
+    // Collect from events
+    if (sessionData.events) {
+      sessionData.events.forEach(event => {
+        if (event.screenshot?.id) {
+          screenshotIds.add(event.screenshot.id);
+        }
+      });
+    }
+    
+    return Array.from(screenshotIds);
+  }
+
+  countScreenshotsInSession(sessionData) {
+    return this.collectScreenshotIds(sessionData).length;
   }
 
   generateSessionMarkdown(session) {
