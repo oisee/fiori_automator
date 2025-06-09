@@ -66,6 +66,10 @@ class SessionsManager {
       this.exportSessionAsZip(this.selectedSession);
     });
 
+    document.getElementById('modalExportAudioBtn').addEventListener('click', () => {
+      this.exportSessionAsAudio(this.selectedSession);
+    });
+
     document.getElementById('modalReplayBtn').addEventListener('click', () => {
       this.replaySession(this.selectedSession);
     });
@@ -213,6 +217,7 @@ class SessionsManager {
           <p><strong>Duration:</strong> ${duration} seconds</p>
           <p><strong>Total Events:</strong> ${session.events?.length || 0}</p>
           <p><strong>Network Requests:</strong> ${session.networkRequests?.length || 0}</p>
+          <p><strong>Audio Recording:</strong> ${session.metadata?.audioRecording ? '🎤 Yes' : '❌ No'}</p>
           
           <div class="event-list">
             <h3>Events Timeline</h3>
@@ -396,6 +401,60 @@ class SessionsManager {
     } catch (error) {
       console.error('Screenshot export failed:', error);
       this.showNotification('Screenshot export failed', 'error');
+    }
+  }
+
+  async exportSessionAsAudio(session) {
+    try {
+      this.showNotification('Exporting session audio...', 'info');
+      
+      const response = await chrome.runtime.sendMessage({
+        type: 'export-session-audio',
+        sessionId: session.sessionId
+      });
+
+      if (response && response.success) {
+        if (!response.audioData) {
+          this.showNotification('No audio data found in this session', 'warning');
+          return;
+        }
+
+        // Reconstruct audio blob from chunks
+        const audioChunks = response.audioData.audioData.chunks;
+        const audioBlobs = [];
+        
+        for (const chunk of audioChunks) {
+          // Convert base64 back to blob
+          const byteCharacters = atob(chunk.data);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          audioBlobs.push(byteArray);
+        }
+
+        // Create final audio blob
+        const audioBlob = new Blob(audioBlobs, { type: 'audio/webm;codecs=opus' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        
+        // Download audio file
+        const link = document.createElement('a');
+        link.href = audioUrl;
+        link.download = response.audioData.filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(audioUrl);
+        
+        const duration = Math.round((response.audioData.duration || 0) / 1000);
+        this.showNotification(`Audio exported! Duration: ${duration}s, ${audioChunks.length} chunks.`);
+      } else {
+        throw new Error(response?.error || 'Audio export failed');
+      }
+    } catch (error) {
+      console.error('Audio export failed:', error);
+      this.showNotification('Audio export failed', 'error');
     }
   }
 

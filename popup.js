@@ -93,6 +93,16 @@ class FioriTestPopup {
       manualScreenshotBtn.addEventListener('click', () => this.captureManualScreenshot());
     }
 
+    // Add audio export button if it exists
+    const audioExportBtn = document.getElementById('exportAudioBtn');
+    console.log('Audio export button found:', !!audioExportBtn);
+    if (audioExportBtn) {
+      audioExportBtn.addEventListener('click', () => this.exportSessionAudio());
+      console.log('Audio export button event listener added');
+    } else {
+      console.warn('Audio export button not found in DOM');
+    }
+
     // Listen for background script messages
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       this.handleMessage(message, sender, sendResponse);
@@ -155,6 +165,7 @@ class FioriTestPopup {
         captureUI5Context: document.getElementById('captureUI5Context').checked,
         autoCorrelation: document.getElementById('autoCorrelation').checked,
         filterJSRequests: document.getElementById('filterJSRequests').checked,
+        recordAudio: document.getElementById('recordAudio').checked,
         applicationUrl: this.currentTab.url,
         timestamp: Date.now()
       };
@@ -690,6 +701,66 @@ class FioriTestPopup {
     } catch (error) {
       console.error('Screenshot export failed:', error);
       this.showError('Screenshot export failed');
+    } finally {
+      this.hideLoading();
+    }
+  }
+
+  async exportSessionAudio() {
+    try {
+      if (!this.currentState || !this.currentState.sessionId) {
+        this.showError('No session data to export');
+        return;
+      }
+
+      this.showLoading('Exporting session audio...');
+
+      const response = await chrome.runtime.sendMessage({
+        type: 'export-session-audio',
+        tabId: this.currentTab.id,
+        sessionId: this.currentState.sessionId
+      });
+
+      if (response && response.success) {
+        if (!response.audioData) {
+          this.showError('No audio data found in this session');
+          return;
+        }
+
+        // Reconstruct audio blob from chunks
+        const audioChunks = response.audioData.audioData.chunks;
+        const audioBlobs = [];
+        
+        for (const chunk of audioChunks) {
+          // Convert base64 back to blob
+          const byteCharacters = atob(chunk.data);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          audioBlobs.push(byteArray);
+        }
+
+        // Create final audio blob
+        const audioBlob = new Blob(audioBlobs, { type: 'audio/webm;codecs=opus' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        
+        // Download audio file
+        const link = document.createElement('a');
+        link.href = audioUrl;
+        link.download = response.audioData.filename;
+        link.click();
+        URL.revokeObjectURL(audioUrl);
+        
+        const duration = Math.round((response.audioData.duration || 0) / 1000);
+        this.showSuccess(`Audio exported! Duration: ${duration}s, ${audioChunks.length} chunks.`);
+      } else {
+        throw new Error(response?.error || 'Audio export failed');
+      }
+    } catch (error) {
+      console.error('Audio export failed:', error);
+      this.showError('Audio export failed');
     } finally {
       this.hideLoading();
     }

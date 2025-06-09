@@ -8,7 +8,7 @@
 
 body {
     width: 400px;
-    min-height: 500px;
+    min-height: 550px;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     font-size: 14px;
     line-height: 1.4;
@@ -19,7 +19,7 @@ body {
 .container {
     display: flex;
     flex-direction: column;
-    min-height: 500px;
+    min-height: 550px;
 }
 
 /* Header */
@@ -416,6 +416,13 @@ body {
 .footer-row:last-child {
     /* Second row: Export buttons */
     justify-content: center;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.btn.btn-small {
+    font-size: 11px;
+    padding: 6px 8px;
 }
 
 /* Loading Overlay */

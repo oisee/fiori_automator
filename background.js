@@ -6,6 +6,7 @@ class FioriTestBackground {
     this.sessions = new Map();
     this.networkRequests = new Map();
     this.screenshots = new Map(); // Store screenshots by ID
+    this.audioRecordings = new Map(); // Store audio recordings by session ID
     this.debug = false;
     this.lastScreenshotTime = 0; // Track last screenshot time for rate limiting
     this.screenshotQueue = []; // Queue for pending screenshots
@@ -460,6 +461,36 @@ class FioriTestBackground {
           break;
         }
 
+        case 'store-audio-chunk': {
+          const tabId = sender.tab?.id || message.tabId;
+          await this.storeAudioChunk(tabId, message.audioData, message.timestamp);
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'start-audio-recording': {
+          const tabId = sender.tab?.id || message.tabId;
+          await this.startAudioRecording(tabId);
+          sendResponse({ success: true });
+          break;
+        }
+
+        case 'stop-audio-recording': {
+          const tabId = sender.tab?.id || message.tabId;
+          const audioData = await this.stopAudioRecording(tabId);
+          sendResponse({ success: true, audioData });
+          break;
+        }
+
+        case 'export-session-audio': {
+          const audioResult = await this.exportSessionAudio(message.sessionId || sender.tab?.id || message.tabId);
+          sendResponse({ 
+            success: true, 
+            audioData: audioResult
+          });
+          break;
+        }
+
         default:
           sendResponse({ success: false, error: 'Unknown message type' });
       }
@@ -483,7 +514,8 @@ class FioriTestBackground {
         ...sessionData,
         sessionName: improvedSessionName || sessionData.sessionName,
         originalSessionName: sessionData.sessionName,
-        userAgent: navigator.userAgent
+        userAgent: navigator.userAgent,
+        audioRecording: sessionData.recordAudio || false
       },
       events: [],
       networkRequests: [],
@@ -495,7 +527,18 @@ class FioriTestBackground {
 
     this.sessions.set(tabId, session);
     
-    // Notify content script to start recording
+    // Start audio recording if enabled
+    if (sessionData.recordAudio) {
+      try {
+        await this.startAudioRecording(tabId);
+        this.log('Audio recording started with session');
+      } catch (error) {
+        this.logError('Failed to start audio recording:', error);
+        // Continue with session even if audio fails
+      }
+    }
+    
+    // Notify content script to start recording (including audio if enabled)
     await this.notifyContentScript(tabId, 'start-recording', sessionData);
     
     // Broadcast state change
@@ -514,6 +557,16 @@ class FioriTestBackground {
       session.isPaused = false;
       session.endTime = Date.now();
       session.duration = session.endTime - session.startTime - session.pausedTime;
+
+      // Stop audio recording if it was enabled
+      try {
+        const audioData = await this.stopAudioRecording(tabId);
+        if (audioData) {
+          this.log('Audio recording stopped with session');
+        }
+      } catch (error) {
+        this.logError('Failed to stop audio recording:', error);
+      }
 
       // Notify content script to stop recording
       await this.notifyContentScript(tabId, 'stop-recording');
@@ -2719,6 +2772,136 @@ class FioriTestBackground {
     delete stats.elementsEdited; // Convert Set to count
 
     return stats;
+  }
+
+  // Audio Recording Methods
+  async startAudioRecording(tabId) {
+    try {
+      const session = this.sessions.get(tabId);
+      if (!session) {
+        throw new Error('No active session found');
+      }
+
+      // Initialize audio recording for session
+      this.audioRecordings.set(session.sessionId, {
+        tabId: tabId,
+        sessionId: session.sessionId,
+        startTime: Date.now(),
+        chunks: [],
+        isRecording: true
+      });
+
+      this.log(`Audio recording started for session ${session.sessionId}`);
+      return true;
+    } catch (error) {
+      this.logError('Failed to start audio recording:', error);
+      throw error;
+    }
+  }
+
+  async stopAudioRecording(tabId) {
+    try {
+      const session = this.sessions.get(tabId);
+      if (!session) {
+        throw new Error('No active session found');
+      }
+
+      const audioData = this.audioRecordings.get(session.sessionId);
+      if (!audioData) {
+        this.log('No audio recording found for session');
+        return null;
+      }
+
+      audioData.isRecording = false;
+      audioData.endTime = Date.now();
+      audioData.duration = audioData.endTime - audioData.startTime;
+
+      this.log(`Audio recording stopped for session ${session.sessionId}, duration: ${audioData.duration}ms, chunks: ${audioData.chunks.length}`);
+      return audioData;
+    } catch (error) {
+      this.logError('Failed to stop audio recording:', error);
+      throw error;
+    }
+  }
+
+  async storeAudioChunk(tabId, audioChunkData, timestamp) {
+    try {
+      const session = this.sessions.get(tabId);
+      if (!session) {
+        return false;
+      }
+
+      const audioData = this.audioRecordings.get(session.sessionId);
+      if (!audioData || !audioData.isRecording) {
+        return false;
+      }
+
+      audioData.chunks.push({
+        data: audioChunkData,
+        timestamp: timestamp || Date.now()
+      });
+
+      return true;
+    } catch (error) {
+      this.logError('Failed to store audio chunk:', error);
+      return false;
+    }
+  }
+
+  generateAudioFilename(session) {
+    try {
+      // Create clean timestamp: YYYY-MM-DD-HHMM
+      const date = new Date(session.startTime);
+      const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD
+      const timeStr = date.toISOString().split('T')[1].slice(0, 5).replace(':', ''); // HHMM
+      const timestamp = `${dateStr}-${timeStr}`;
+      
+      // Extract concise session name
+      const sessionNameShort = this.extractConciseSessionName(session);
+      
+      return `fs-${timestamp}-${sessionNameShort}.webm`;
+    } catch (error) {
+      this.logError('Error generating audio filename:', error);
+      const timestamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+      return `fs-${timestamp}-session.webm`;
+    }
+  }
+
+  async exportSessionAudio(sessionIdentifier) {
+    try {
+      // Get session data
+      let sessionData;
+      if (typeof sessionIdentifier === 'string') {
+        // Session ID provided
+        const allSessions = await this.getAllSessions();
+        sessionData = allSessions[sessionIdentifier];
+      } else {
+        // Tab ID provided
+        sessionData = this.sessions.get(sessionIdentifier);
+      }
+
+      if (!sessionData) {
+        throw new Error('Session not found');
+      }
+
+      const audioData = this.audioRecordings.get(sessionData.sessionId);
+      if (!audioData || !audioData.chunks.length) {
+        return null; // No audio recorded
+      }
+
+      // Generate semantic filename
+      const filename = this.generateAudioFilename(sessionData);
+      
+      return {
+        filename: filename,
+        audioData: audioData,
+        duration: audioData.duration,
+        chunkCount: audioData.chunks.length
+      };
+    } catch (error) {
+      this.logError('Failed to export session audio:', error);
+      throw error;
+    }
   }
 }
 

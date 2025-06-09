@@ -10,6 +10,9 @@ if (!window.FioriTestCapture) {
       this.eventQueue = [];
       this.lastScreenshot = null;
       this.ui5Context = null;
+      this.mediaRecorder = null;
+      this.audioStream = null;
+      this.audioChunks = [];
       this.init();
     }
 
@@ -124,7 +127,7 @@ if (!window.FioriTestCapture) {
         break;
 
       case 'start-recording':
-        this.startRecording();
+        this.startRecording(message.data);
         sendResponse({ success: true });
         break;
 
@@ -155,11 +158,17 @@ if (!window.FioriTestCapture) {
     }
   }
 
-  startRecording() {
-    console.log('[Fiori] Start recording called');
+  startRecording(sessionData = {}) {
+    console.log('[Fiori] Start recording called with data:', sessionData);
     this.isRecording = true;
     this.eventQueue = [];
     this.addRecordingIndicator();
+    
+    // Start audio recording if enabled
+    if (sessionData && sessionData.recordAudio) {
+      this.startAudioRecording();
+    }
+    
     console.log('[Fiori] Recording started - isRecording =', this.isRecording);
     console.log('[Fiori] Event listeners should now capture events when user interacts with page');
     
@@ -175,6 +184,10 @@ if (!window.FioriTestCapture) {
   stopRecording() {
     this.isRecording = false;
     this.removeRecordingIndicator();
+    
+    // Stop audio recording if it was active
+    this.stopAudioRecording();
+    
     console.log('Fiori Test Capture: Recording stopped');
   }
 
@@ -1366,6 +1379,117 @@ if (!window.FioriTestCapture) {
         error: error.message
       });
       console.log('[Fiori] Event stored locally due to communication failure');
+    }
+  }
+
+  // Audio Recording Methods
+  async startAudioRecording() {
+    try {
+      console.log('[Fiori] Starting audio recording...');
+      
+      // Initialize audio recording directly
+      if (!this.mediaRecorder) {
+        await this.initializeAudioRecording();
+      }
+
+      if (this.mediaRecorder && this.mediaRecorder.state === 'inactive') {
+        this.audioChunks = [];
+        this.mediaRecorder.start(1000); // 1 second chunks
+        console.log('[Fiori] Audio recording started successfully');
+        
+        // Notify background script
+        chrome.runtime.sendMessage({
+          type: 'start-audio-recording'
+        });
+      }
+    } catch (error) {
+      console.error('[Fiori] Failed to start audio recording:', error);
+    }
+  }
+
+  async stopAudioRecording() {
+    try {
+      if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+        console.log('[Fiori] Stopping audio recording...');
+        
+        this.mediaRecorder.stop();
+        
+        // Stop all audio tracks
+        if (this.audioStream) {
+          this.audioStream.getTracks().forEach(track => track.stop());
+        }
+        
+        console.log('[Fiori] Audio recording stopped successfully');
+      }
+    } catch (error) {
+      console.error('[Fiori] Failed to stop audio recording:', error);
+    }
+  }
+
+  async initializeAudioRecording() {
+    try {
+      console.log('[Fiori] Initializing audio recording...');
+      
+      // Request microphone access
+      this.audioStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+
+      // Create MediaRecorder
+      this.mediaRecorder = new MediaRecorder(this.audioStream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+
+      this.audioChunks = [];
+
+      // Handle data chunks
+      this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          this.audioChunks.push(event.data);
+          console.log('[Fiori] Audio chunk captured:', event.data.size, 'bytes');
+          
+          // Send chunk to background script
+          this.sendAudioChunkToBackground(event.data);
+        }
+      };
+
+      // Handle recording stop
+      this.mediaRecorder.onstop = () => {
+        console.log('[Fiori] MediaRecorder stopped, final chunks:', this.audioChunks.length);
+        
+        // Notify background script
+        chrome.runtime.sendMessage({
+          type: 'stop-audio-recording'
+        });
+      };
+
+      console.log('[Fiori] Audio recording initialized successfully');
+    } catch (error) {
+      console.error('[Fiori] Failed to initialize audio recording:', error);
+      throw error;
+    }
+  }
+
+  async sendAudioChunkToBackground(audioData) {
+    try {
+      // Convert blob to base64
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64Data = reader.result.split(',')[1];
+        
+        chrome.runtime.sendMessage({
+          type: 'store-audio-chunk',
+          audioData: base64Data,
+          timestamp: Date.now()
+        });
+      };
+      reader.readAsDataURL(audioData);
+    } catch (error) {
+      console.error('[Fiori] Failed to send audio chunk:', error);
     }
   }
 

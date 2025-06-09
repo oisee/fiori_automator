@@ -285,8 +285,14 @@ body {
     padding: 20px;
     border-top: 1px solid #e9ecef;
     display: flex;
-    gap: 10px;
+    gap: 8px;
     justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
+.modal-footer .btn {
+    font-size: 13px;
+    padding: 8px 12px;
 }
 
 /* Event List in Modal */
