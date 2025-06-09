@@ -7,6 +7,9 @@ class FioriTestBackground {
     this.networkRequests = new Map();
     this.screenshots = new Map(); // Store screenshots by ID
     this.debug = false;
+    this.lastScreenshotTime = 0; // Track last screenshot time for rate limiting
+    this.screenshotQueue = []; // Queue for pending screenshots
+    this.processingScreenshots = false;
     this.init();
   }
 
@@ -492,6 +495,9 @@ class FioriTestBackground {
 
     this.sessions.set(tabId, session);
     
+    // Notify content script to start recording
+    await this.notifyContentScript(tabId, 'start-recording', sessionData);
+    
     // Broadcast state change
     this.broadcastStateChange(tabId, 'recording');
   }
@@ -508,6 +514,9 @@ class FioriTestBackground {
       session.isPaused = false;
       session.endTime = Date.now();
       session.duration = session.endTime - session.startTime - session.pausedTime;
+
+      // Notify content script to stop recording
+      await this.notifyContentScript(tabId, 'stop-recording');
 
       // Save session to storage
       await this.saveSession(session);
@@ -1196,8 +1205,10 @@ class FioriTestBackground {
     if (event.element?.textContent?.includes('Assign') || 
         event.element?.id?.includes('assign') ||
         event.element?.id?.includes('Assign')) {
+      const bodyString = typeof requestData.requestBody === 'string' ? requestData.requestBody : 
+                        (requestData.requestBody ? JSON.stringify(requestData.requestBody) : '');
       if (timeDiff >= 0 && timeDiff <= 3000 && 
-          (requestData.requestBody?.includes('SetMeAsResponsiblePerson') ||
+          (bodyString.includes('SetMeAsResponsiblePerson') ||
            requestData.url?.includes('SetMeAsResponsiblePerson'))) {
         return true;
       }
@@ -1320,6 +1331,60 @@ class FioriTestBackground {
 
 
   async captureTabScreenshot(tabId, elementInfo, eventType = null, eventId = null) {
+    // Queue the screenshot request to handle rate limiting
+    return new Promise((resolve, reject) => {
+      this.screenshotQueue.push({
+        tabId,
+        elementInfo,
+        eventType,
+        eventId,
+        resolve,
+        reject
+      });
+      
+      // Process queue if not already processing
+      if (!this.processingScreenshots) {
+        this.processScreenshotQueue();
+      }
+    });
+  }
+  
+  async processScreenshotQueue() {
+    if (this.processingScreenshots || this.screenshotQueue.length === 0) {
+      return;
+    }
+    
+    this.processingScreenshots = true;
+    
+    while (this.screenshotQueue.length > 0) {
+      const request = this.screenshotQueue.shift();
+      
+      try {
+        // Rate limiting: Chrome allows 2 captures per second, so wait at least 550ms between captures
+        const now = Date.now();
+        const timeSinceLastCapture = now - this.lastScreenshotTime;
+        if (timeSinceLastCapture < 550) {
+          await new Promise(resolve => setTimeout(resolve, 550 - timeSinceLastCapture));
+        }
+        
+        const screenshotData = await this.captureTabScreenshotInternal(
+          request.tabId,
+          request.elementInfo,
+          request.eventType,
+          request.eventId
+        );
+        
+        this.lastScreenshotTime = Date.now();
+        request.resolve(screenshotData);
+      } catch (error) {
+        request.reject(error);
+      }
+    }
+    
+    this.processingScreenshots = false;
+  }
+
+  async captureTabScreenshotInternal(tabId, elementInfo, eventType = null, eventId = null) {
     try {
       // Get the current tab info
       const tab = await chrome.tabs.get(tabId);
@@ -1776,9 +1841,12 @@ class FioriTestBackground {
         }
 
         // Classify operation type
-        if (request.requestBody?.includes('MERGE')) {
+        const bodyString = typeof request.requestBody === 'string' ? request.requestBody : 
+                          (request.requestBody ? JSON.stringify(request.requestBody) : '');
+        
+        if (bodyString.includes('MERGE')) {
           operations.push({ type: 'UPDATE', description: 'Entity update operation' });
-        } else if (request.requestBody?.includes('POST') && !request.url.includes('$batch')) {
+        } else if (bodyString.includes('POST') && !request.url.includes('$batch')) {
           operations.push({ type: 'CREATE', description: 'Entity creation operation' });
         } else if (request.url.includes('$batch')) {
           operations.push({ type: 'BATCH', description: 'Batch operation with multiple requests' });

@@ -174,14 +174,8 @@ class FioriTestPopup {
         // Refresh state from background (single source of truth)
         await this.refreshState();
         
-        // Notify content script with retry
-        try {
-          await this.ensureContentScriptAndNotify('start-recording', config);
-          console.log('Content script notified');
-        } catch (contentError) {
-          console.warn('Could not notify content script:', contentError);
-          // Continue anyway - background script will handle injection
-        }
+        // Background script now handles content script notification
+        console.log('Recording started via background script');
         
         this.showSuccess('Recording started!');
       } else {
@@ -238,12 +232,8 @@ class FioriTestPopup {
         // Refresh state from background
         await this.refreshState();
         
-        // Notify content script with retry
-        try {
-          await this.ensureContentScriptAndNotify('stop-recording');
-        } catch (contentError) {
-          console.warn('Could not notify content script:', contentError);
-        }
+        // Background script now handles content script notification
+        console.log('Recording stopped via background script');
 
         // Show completion message
         this.showSuccess('Recording completed successfully!');
@@ -479,7 +469,7 @@ class FioriTestPopup {
 
       // Check if DOM elements exist before trying to use them
       if (!sessionsList || !noSessions) {
-        console.warn('Sessions list DOM elements not found, skipping session load');
+        // This can happen if popup is opened without session list (e.g., in recording panel)
         return;
       }
 
