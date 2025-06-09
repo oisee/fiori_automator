@@ -12,6 +12,18 @@ class SessionsManager {
     await this.loadSessions();
     this.setupEventListeners();
     this.renderSessions();
+    this.checkForSelectedSession();
+  }
+
+  checkForSelectedSession() {
+    // Check if a specific session was requested via URL parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionId = urlParams.get('sessionId');
+    
+    if (sessionId && this.sessions[sessionId]) {
+      // Auto-open the requested session
+      this.showSessionDetails(this.sessions[sessionId]);
+    }
   }
 
   setupEventListeners() {

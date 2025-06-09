@@ -557,12 +557,21 @@ class FioriTestCapture {
         return '#2196F3'; // Blue for OData
       case 'odata-metadata':
         return '#9C27B0'; // Purple for metadata
+      case 'csrf-token':
+      case 'auth-token':
+      case 'authentication':
+        return '#FFC107'; // Amber for auth
       case 'sap-post':
       case 'sap-put':
       case 'sap-patch':
         return '#FF9800'; // Orange for SAP modifications
       case 'sap-delete':
         return '#F44336'; // Red for deletions
+      case 'webapp-post':
+      case 'webapp-put':
+      case 'webapp-patch':
+      case 'webapp-delete':
+        return '#607D8B'; // Blue Grey for web app requests
       default:
         return '#4CAF50'; // Green for others
     }
@@ -573,17 +582,20 @@ class FioriTestCapture {
     indicator.id = 'fiori-recording-indicator';
     indicator.style.cssText = `
       position: fixed;
-      top: 10px;
-      left: 10px;
-      background: #f44336;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(244, 67, 54, 0.9);
       color: white;
-      padding: 8px 12px;
+      padding: 8px 16px;
       border-radius: 20px;
       font-size: 12px;
       font-weight: bold;
       z-index: 999999;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
       animation: pulse 2s infinite;
+      backdrop-filter: blur(4px);
+      border: 1px solid rgba(255,255,255,0.2);
     `;
     indicator.innerHTML = '🔴 Recording Fiori Session';
     
@@ -591,9 +603,9 @@ class FioriTestCapture {
     const style = document.createElement('style');
     style.textContent = `
       @keyframes pulse {
-        0% { opacity: 1; }
+        0% { opacity: 0.8; }
         50% { opacity: 0.5; }
-        100% { opacity: 1; }
+        100% { opacity: 0.8; }
       }
     `;
     document.head.appendChild(style);

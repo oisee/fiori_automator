@@ -163,12 +163,40 @@ class FioriTestBackground {
   }
 
   isRelevantRequest(url, method) {
-    // Capture data modification requests and OData calls
-    const isDataModifying = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+    // Capture ALL requests for SAP applications and OData
     const isOData = this.isODataRequest(url);
     const isSAPRequest = this.isSAPRequest(url);
+    const isDataModifying = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+    const isAuthOrToken = this.isAuthRequest(url);
     
-    return isOData || (isDataModifying && isSAPRequest);
+    // Record all SAP-related requests, OData, and authentication/token requests
+    return isOData || isSAPRequest || isAuthOrToken || (isDataModifying && this.isWebAppRequest(url));
+  }
+
+  isAuthRequest(url) {
+    // Capture authentication and token requests
+    return url.includes('/csrf') ||
+           url.includes('/token') ||
+           url.includes('/auth') ||
+           url.includes('/login') ||
+           url.includes('/saml') ||
+           url.includes('/oauth') ||
+           url.includes('x-csrf-token') ||
+           url.includes('SecurityToken');
+  }
+
+  isWebAppRequest(url) {
+    // Basic check for web application requests (not static assets)
+    const staticExtensions = ['.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.woff', '.woff2', '.ttf'];
+    const hasStaticExtension = staticExtensions.some(ext => url.includes(ext));
+    
+    return !hasStaticExtension && (
+      url.includes('/api/') ||
+      url.includes('/service/') ||
+      url.includes('/data/') ||
+      url.includes('.json') ||
+      url.includes('?') // Query parameters often indicate dynamic requests
+    );
   }
 
   isODataRequest(url) {
@@ -195,8 +223,19 @@ class FioriTestBackground {
       return 'odata';
     }
     
+    if (this.isAuthRequest(url)) {
+      if (url.includes('/csrf')) return 'csrf-token';
+      if (url.includes('/token')) return 'auth-token';
+      if (url.includes('/auth') || url.includes('/login')) return 'authentication';
+      return 'auth-request';
+    }
+    
     if (this.isSAPRequest(url)) {
       return `sap-${method.toLowerCase()}`;
+    }
+    
+    if (this.isWebAppRequest(url)) {
+      return `webapp-${method.toLowerCase()}`;
     }
     
     return `${method.toLowerCase()}`;

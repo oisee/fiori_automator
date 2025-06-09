@@ -458,7 +458,13 @@ class FioriTestPopup {
       const sessionsList = document.getElementById('sessionsList');
       const noSessions = document.getElementById('noSessions');
 
-      if (response.success && response.data) {
+      // Check if DOM elements exist before trying to use them
+      if (!sessionsList || !noSessions) {
+        console.warn('Sessions list DOM elements not found, skipping session load');
+        return;
+      }
+
+      if (response && response.success && response.data) {
         const sessions = Object.values(response.data)
           .sort((a, b) => b.startTime - a.startTime)
           .slice(0, 5); // Show last 5 sessions
@@ -504,10 +510,12 @@ class FioriTestPopup {
   }
 
   openSession(session) {
-    // This would open a detailed session viewer
-    console.log('Opening session:', session);
-    // For now, just show an alert
-    alert(`Session: ${session.metadata?.sessionName || 'Unnamed'}\nActions: ${session.events?.length || 0}\nDuration: ${session.duration ? Math.round(session.duration / 1000) + 's' : 'Unknown'}`);
+    // Open sessions management page with specific session selected
+    const sessionUrl = chrome.runtime.getURL('sessions.html') + `?sessionId=${session.sessionId}`;
+    chrome.tabs.create({ url: sessionUrl });
+    
+    // Close this popup
+    window.close();
   }
 
   viewAllSessions() {
