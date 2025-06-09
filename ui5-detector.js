@@ -1,161 +1,229 @@
-// UI5 Detection Script - CSP-compliant external script
-// Runs in page context to access UI5 core without CSP violations
+// UI5 Detector Script - Enhanced SAPUI5 detection
+// This script is injected into the page context for deeper UI5 analysis
 
 (function() {
   'use strict';
   
-  try {
-    const detection = {
+  console.log('[UI5 Detector] Starting enhanced UI5 detection');
+  
+  function performEnhancedUI5Detection() {
+    const result = {
+      timestamp: Date.now(),
       isSAPUI5: false,
-      isFiori: false,
-      hasCore: false,
-      loadedLibraries: [],
+      version: null,
+      buildInfo: null,
+      libraries: [],
+      loadedModules: [],
       theme: null,
       locale: null,
-      version: null,
-      viewIdPrefixDetected: false,
-      fioriClassDetected: false,
-      uiAreas: [],
+      bootPath: null,
+      resourceRoots: {},
       components: [],
-      detectionMethod: 'external-script',
-      appSemantics: null
+      views: [],
+      models: [],
+      confidence: 0,
+      detectionMethods: [],
+      errors: []
     };
-
-    // Check for SAPUI5/OpenUI5
-    if (window.sap?.ui?.getCore) {
-      const core = window.sap.ui.getCore();
-      detection.isSAPUI5 = true;
-      detection.hasCore = true;
-      detection.version = window.sap.ui.version;
-
-      try {
-        detection.loadedLibraries = Object.keys(core.getLoadedLibraries?.() || {});
-        detection.theme = core.getConfiguration?.().getTheme?.();
-        detection.locale = core.getConfiguration?.().getLocale?.().toString();
-        detection.uiAreas = core.getUIAreas?.().map(area => ({
-          id: area.getId?.(),
-          content: area.getContent?.().length || 0
-        })) || [];
-
-        // Get component information
-        const componentRegistry = core.getComponentRegistry?.();
-        if (componentRegistry) {
-          detection.components = Object.keys(componentRegistry).map(id => {
-            const component = componentRegistry[id];
-            return {
-              id: id,
-              manifest: component.getManifest?.()?.['sap.app']?.id,
-              type: component.getMetadata?.()?.getName()
-            };
-          });
-        }
-
-        // Detect app semantics for better file naming
-        detection.appSemantics = detectAppSemantics();
-        
-      } catch (e) {
-        console.warn('Error getting UI5 core details:', e);
-      }
-
-      // Heuristic: Fiori app detection by ID patterns
-      detection.viewIdPrefixDetected = !!document.querySelector('[id^="application-"][id*="--"]');
-      
-      // Heuristic: Fiori shell/page detection
-      detection.fioriClassDetected = !!(
-        document.querySelector('.sapMPage, .sapUshellShell, .sapUshellTileContainer') ||
-        document.querySelector('[class*="sapMObject"]') ||
-        document.querySelector('[class*="sapUshell"]')
-      );
-
-      detection.isFiori = detection.viewIdPrefixDetected || detection.fioriClassDetected;
-    }
-
-    // Dispatch result to content script
-    window.dispatchEvent(new CustomEvent('SAPUI5DetectionResult', { 
-      detail: detection 
-    }));
     
-  } catch (err) {
-    console.warn('SAPUI5 detection error:', err);
-    window.dispatchEvent(new CustomEvent('SAPUI5DetectionResult', { 
-      detail: { 
-        isSAPUI5: false, 
-        error: err.message,
-        detectionMethod: 'external-script-error'
-      } 
-    }));
-  }
-
-  function detectAppSemantics() {
     try {
-      // Try to detect app type from various sources
-      const semantics = {
-        appType: 'unknown',
-        businessObject: null,
-        scenario: null
-      };
-
-      // Method 1: From URL hash
-      const hash = window.location.hash;
-      if (hash.includes('#')) {
-        const hashPart = hash.split('#')[1];
-        if (hashPart.includes('ComplianceAlert-manage')) {
-          semantics.appType = 'manage-alerts';
-          semantics.businessObject = 'ComplianceAlert';
-          semantics.scenario = 'manage';
-        } else if (hashPart.includes('DetectionMethod-manage')) {
-          semantics.appType = 'manage-detection-methods';
-          semantics.businessObject = 'DetectionMethod';
-          semantics.scenario = 'manage';
-        } else if (hashPart.includes('Shell-home')) {
-          semantics.appType = 'fiori-launchpad';
-          semantics.scenario = 'home';
+      // Method 1: Direct SAP namespace detection
+      if (window.sap && window.sap.ui) {
+        result.isSAPUI5 = true;
+        result.detectionMethods.push('sap-namespace');
+        
+        // Get version information
+        if (window.sap.ui.version) {
+          result.version = window.sap.ui.version;
         }
-      }
-
-      // Method 2: From page title
-      const title = document.title;
-      if (title.includes('Manage Alerts')) {
-        semantics.appType = 'manage-alerts';
-        semantics.businessObject = 'Alert';
-      } else if (title.includes('Launchpad')) {
-        semantics.appType = 'fiori-launchpad';
-      }
-
-      // Method 3: From component manifest
-      if (window.sap?.ui?.getCore) {
-        const core = window.sap.ui.getCore();
-        const componentRegistry = core.getComponentRegistry?.();
-        if (componentRegistry) {
-          for (let id in componentRegistry) {
-            const component = componentRegistry[id];
-            const manifest = component.getManifest?.();
-            if (manifest?.['sap.app']?.id) {
-              const appId = manifest['sap.app'].id;
-              if (appId.includes('fraud.alertworklist')) {
-                semantics.appType = 'manage-alerts';
-                semantics.businessObject = 'Alert';
-                semantics.scenario = 'worklist';
+        
+        // Get build information
+        if (window.sap.ui.buildinfo) {
+          result.buildInfo = window.sap.ui.buildinfo;
+        }
+        
+        try {
+          // Access UI5 Core
+          const core = window.sap.ui.getCore();
+          if (core) {
+            result.detectionMethods.push('ui5-core-access');
+            
+            // Configuration
+            const config = core.getConfiguration();
+            if (config) {
+              result.theme = config.getTheme();
+              result.locale = config.getLocale()?.toString();
+              result.bootPath = config.getBootstrapPath();
+              result.resourceRoots = config.getResourceRoots();
+            }
+            
+            // Loaded libraries
+            const libraries = core.getLoadedLibraries();
+            result.libraries = Object.keys(libraries || {});
+            
+            // UI Areas and Components
+            const uiAreas = core.getUIAreas();
+            result.components = [];
+            result.views = [];
+            
+            if (uiAreas) {
+              for (let area of uiAreas) {
+                try {
+                  const content = area.getContent();
+                  if (content && content.length > 0) {
+                    for (let item of content) {
+                      if (item.getMetadata) {
+                        const metadata = item.getMetadata();
+                        const componentInfo = {
+                          id: item.getId(),
+                          type: metadata.getName(),
+                          element: item.getDomRef()?.tagName
+                        };
+                        result.components.push(componentInfo);
+                      }
+                    }
+                  }
+                } catch (err) {
+                  result.errors.push(`UI Area processing: ${err.message}`);
+                }
               }
             }
+            
+            // Try to get loaded modules
+            if (window.sap.ui.loader && window.sap.ui.loader._.getModuleState) {
+              const modules = [];
+              // This is internal API, so wrap in try-catch
+              try {
+                const moduleNames = Object.keys(window.sap.ui.loader._.mModules || {});
+                result.loadedModules = moduleNames.slice(0, 50); // Limit to first 50
+              } catch (err) {
+                result.errors.push(`Module enumeration: ${err.message}`);
+              }
+            }
+            
+            result.confidence = 0.95; // Very high confidence
           }
+        } catch (coreError) {
+          result.errors.push(`Core access: ${coreError.message}`);
+          result.confidence = 0.8; // High confidence but core access failed
         }
       }
-
-      // Method 4: From DOM analysis
-      if (document.querySelector('[id*="alertHeaderAssignButton"]')) {
-        semantics.appType = 'manage-alerts';
-        semantics.scenario = 'detail';
-      } else if (document.querySelector('.sapUshellTileContainer')) {
-        semantics.appType = 'fiori-launchpad';
-        semantics.scenario = 'home';
+      
+      // Method 2: jQuery UI5 plugin detection
+      if (window.jQuery && window.jQuery.sap) {
+        result.detectionMethods.push('jquery-sap');
+        if (!result.isSAPUI5) {
+          result.isSAPUI5 = true;
+          result.confidence = Math.max(result.confidence, 0.7);
+        }
       }
-
-      return semantics;
+      
+      // Method 3: Bootstrap script detection
+      const bootstrap = document.querySelector('#sap-ui-bootstrap');
+      if (bootstrap) {
+        result.detectionMethods.push('bootstrap-script');
+        result.bootPath = bootstrap.src;
+        
+        // Extract configuration from bootstrap script
+        const bootstrapConfig = {
+          theme: bootstrap.getAttribute('data-sap-ui-theme'),
+          libs: bootstrap.getAttribute('data-sap-ui-libs'),
+          resourceroots: bootstrap.getAttribute('data-sap-ui-resourceroots'),
+          compatversion: bootstrap.getAttribute('data-sap-ui-compatversion'),
+          language: bootstrap.getAttribute('data-sap-ui-language')
+        };
+        
+        Object.keys(bootstrapConfig).forEach(key => {
+          if (bootstrapConfig[key]) {
+            result[key] = bootstrapConfig[key];
+          }
+        });
+        
+        if (!result.isSAPUI5) {
+          result.isSAPUI5 = true;
+          result.confidence = Math.max(result.confidence, 0.8);
+        }
+      }
+      
+      // Method 4: Resource script detection
+      const resourceScripts = document.querySelectorAll('script[src*="resources/sap-ui"], script[src*="sap-ui-core"]');
+      if (resourceScripts.length > 0) {
+        result.detectionMethods.push('resource-scripts');
+        if (!result.isSAPUI5) {
+          result.isSAPUI5 = true;
+          result.confidence = Math.max(result.confidence, 0.6);
+        }
+      }
+      
+      // Method 5: CSS and DOM indicators
+      const domIndicators = {
+        sapClasses: document.querySelectorAll('[class*="sap"]').length,
+        fioriShell: !!document.querySelector('.sapUshellShell'),
+        ui5Controls: document.querySelectorAll('[class*="sapM"], [class*="sapUi"]').length,
+        fioriTiles: document.querySelectorAll('.sapUshellTile').length,
+        fioriLaunchpad: !!document.querySelector('.sapUshellContainer')
+      };
+      
+      const domScore = (
+        (domIndicators.sapClasses > 0 ? 0.2 : 0) +
+        (domIndicators.fioriShell ? 0.3 : 0) +
+        (domIndicators.ui5Controls > 0 ? 0.2 : 0) +
+        (domIndicators.fioriTiles > 0 ? 0.2 : 0) +
+        (domIndicators.fioriLaunchpad ? 0.1 : 0)
+      );
+      
+      if (domScore > 0.3) {
+        result.detectionMethods.push('dom-indicators');
+        if (!result.isSAPUI5) {
+          result.isSAPUI5 = true;
+          result.confidence = Math.max(result.confidence, domScore);
+        }
+      }
+      
+      // Method 6: URL pattern analysis
+      const url = window.location.href;
+      const urlPatterns = [
+        /\/sap\/bc\/ui5_ui5\//,
+        /\/sap\/bc\/webdynpro\//,
+        /#Shell-home/,
+        /#.*-manage/,
+        /#.*-display/,
+        /fiori/i,
+        /ui5/i
+      ];
+      
+      const urlMatches = urlPatterns.filter(pattern => pattern.test(url));
+      if (urlMatches.length > 0) {
+        result.detectionMethods.push('url-patterns');
+        if (!result.isSAPUI5) {
+          result.isSAPUI5 = true;
+          result.confidence = Math.max(result.confidence, 0.4);
+        }
+      }
+      
     } catch (error) {
-      console.warn('Error detecting app semantics:', error);
-      return { appType: 'unknown', businessObject: null, scenario: null };
+      result.errors.push(`Detection error: ${error.message}`);
+      console.error('[UI5 Detector] Detection failed:', error);
     }
+    
+    // Final confidence adjustment
+    if (result.isSAPUI5 && result.detectionMethods.length > 1) {
+      result.confidence = Math.min(0.95, result.confidence + (result.detectionMethods.length * 0.05));
+    }
+    
+    return result;
   }
-
+  
+  // Perform detection
+  const detectionResult = performEnhancedUI5Detection();
+  console.log('[UI5 Detector] Detection completed:', detectionResult);
+  
+  // Send result to content script
+  window.dispatchEvent(new CustomEvent('SAPUI5DetectionResult', {
+    detail: detectionResult
+  }));
+  
+  // Expose result globally for debugging
+  window.fioriUI5Detection = detectionResult;
+  
 })();

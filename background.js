@@ -348,9 +348,9 @@ class FioriTestBackground {
           break;
 
         case 'capture-event':
-          const tabId = sender.tab?.id || message.tabId;
-          this.log('Received capture-event message from tab:', tabId, 'Event type:', message.data?.type);
-          await this.captureEvent(tabId, message.data);
+          const eventTabId = sender.tab?.id || message.tabId;
+          this.log('Received capture-event message from tab:', eventTabId, 'Event type:', message.data?.type);
+          await this.captureEvent(eventTabId, message.data);
           this.log('Event processed successfully');
           sendResponse({ success: true });
           break;
