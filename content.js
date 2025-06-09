@@ -160,7 +160,16 @@ if (!window.FioriTestCapture) {
     this.isRecording = true;
     this.eventQueue = [];
     this.addRecordingIndicator();
-    console.log('Fiori Test Capture: Recording started, isRecording =', this.isRecording);
+    console.log('[Fiori] Recording started - isRecording =', this.isRecording);
+    console.log('[Fiori] Event listeners should now capture events when user interacts with page');
+    
+    // Test that event listeners are working by adding a one-time test
+    const testListener = (event) => {
+      console.log('[Fiori] TEST: Event listener is working - captured', event.type, 'on', event.target.tagName);
+      document.removeEventListener('click', testListener, true);
+    };
+    document.addEventListener('click', testListener, true);
+    console.log('[Fiori] Added test listener - click anywhere to verify event capture is working');
   }
 
   stopRecording() {
@@ -170,11 +179,17 @@ if (!window.FioriTestCapture) {
   }
 
   async captureClickEvent(event) {
+    console.log('[Fiori] captureClickEvent called - isRecording:', this.isRecording);
+    
+    if (!this.isRecording) {
+      console.warn('[Fiori] Click event ignored - not recording');
+      return;
+    }
+    
     const element = event.target;
     const rect = element.getBoundingClientRect();
     
-    // Capture screenshot immediately for click events
-    const screenshot = await this.captureEventScreenshot(element, 'click');
+    console.log('[Fiori] Processing click on:', element.tagName, element.id || '(no id)', element.className || '(no class)');
     
     const eventData = {
       type: 'click',
@@ -194,11 +209,17 @@ if (!window.FioriTestCapture) {
         altKey: event.altKey,
         metaKey: event.metaKey
       },
-      screenshot: screenshot
+      pageUrl: window.location.href,
+      pageTitle: document.title
     };
 
-    this.log('Click captured with screenshot:', eventData);
+    console.log('[Fiori] Click event data prepared:', eventData);
+
+    // Send event to background first to get event ID
     await this.sendEventToBackground(eventData);
+    
+    // Note: Screenshot will be captured in background with proper event ID and semantics
+    this.log('[Fiori] Click captured and sent to background:', eventData);
   }
 
   async captureInputEvent(event) {
@@ -1168,7 +1189,7 @@ if (!window.FioriTestCapture) {
     }
   }
 
-  async captureEventScreenshot(element, eventType) {
+  async captureEventScreenshot(element, eventType, eventId = null) {
     try {
       // Skip screenshot capture if disabled
       if (!this.shouldCaptureScreenshots()) {
@@ -1194,11 +1215,14 @@ if (!window.FioriTestCapture) {
         viewportHeight: window.innerHeight
       };
       
-      // Get screenshot via background script with event type
+      // Get screenshot via background script with event type and ID
       const response = await chrome.runtime.sendMessage({
         type: 'capture-screenshot',
         elementInfo: elementInfo,
-        eventType: eventType
+        eventType: eventType,
+        eventId: eventId,
+        pageUrl: window.location.href,
+        pageTitle: document.title
       });
       
       if (response && response.success && response.screenshot) {
@@ -1207,6 +1231,7 @@ if (!window.FioriTestCapture) {
           filename: `${response.screenshot.id}.png`,
           timestamp: response.screenshot.timestamp,
           eventType: eventType,
+          eventId: eventId,
           elementBounds: elementInfo,
           viewportSize: {
             width: window.innerWidth,
@@ -1320,12 +1345,27 @@ if (!window.FioriTestCapture) {
 
   async sendEventToBackground(eventData) {
     try {
-      await chrome.runtime.sendMessage({
+      console.log('[Fiori] Sending event to background:', eventData.type, eventData);
+      const response = await chrome.runtime.sendMessage({
         type: 'capture-event',
         data: eventData
       });
+      
+      if (response && response.success) {
+        console.log('[Fiori] Event sent successfully to background');
+      } else {
+        console.warn('[Fiori] Background script responded with error:', response?.error);
+      }
     } catch (error) {
-      console.error('Failed to send event to background:', error);
+      console.error('[Fiori] Failed to send event to background:', error);
+      // Store event locally as fallback
+      if (!this.eventQueue) this.eventQueue = [];
+      this.eventQueue.push({
+        timestamp: Date.now(),
+        eventData,
+        error: error.message
+      });
+      console.log('[Fiori] Event stored locally due to communication failure');
     }
   }
 

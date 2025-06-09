@@ -348,7 +348,10 @@ class FioriTestBackground {
           break;
 
         case 'capture-event':
-          await this.captureEvent(sender.tab?.id || message.tabId, message.data);
+          const tabId = sender.tab?.id || message.tabId;
+          this.log('Received capture-event message from tab:', tabId, 'Event type:', message.data?.type);
+          await this.captureEvent(tabId, message.data);
+          this.log('Event processed successfully');
           sendResponse({ success: true });
           break;
 
@@ -356,7 +359,8 @@ class FioriTestBackground {
           const screenshot = await this.captureTabScreenshot(
             sender.tab?.id || message.tabId, 
             message.elementInfo, 
-            message.eventType || 'manual'
+            message.eventType || 'manual',
+            message.eventId
           );
           sendResponse({ success: true, screenshot });
           break;
@@ -512,6 +516,13 @@ class FioriTestBackground {
 
   async captureEvent(tabId, eventData) {
     const session = this.sessions.get(tabId);
+    this.log(`captureEvent called for tab ${tabId}:`, {
+      hasSession: !!session,
+      isRecording: session?.isRecording,
+      isPaused: session?.isPaused,
+      eventType: eventData?.type
+    });
+    
     if (session && session.isRecording && !session.isPaused) {
       // Update session semantics from UI5 context if available
       if (eventData.ui5Context?.appSemantics) {
@@ -519,13 +530,43 @@ class FioriTestBackground {
       }
       
       const event = {
-        eventId: this.generateUUID(),
+        eventId: this.generateSequentialEventId(session),
         timestamp: Date.now(),
         ...eventData
       };
 
+      // Check if this is the first meaningful event that should update session name
+      await this.updateSessionNameIfNeeded(session, event, eventData);
+
       // Apply input event coalescing
       this.addEventWithCoalescing(session, event);
+      
+      // Capture screenshot after event is processed and has proper ID
+      if (this.shouldCaptureScreenshotForEvent(event)) {
+        try {
+          const screenshot = await this.captureTabScreenshot(
+            tabId, 
+            eventData.element, 
+            event.type, 
+            event.eventId
+          );
+          
+          if (screenshot) {
+            // Update the event with screenshot reference
+            const eventIndex = session.events.findIndex(e => e.eventId === event.eventId);
+            if (eventIndex !== -1) {
+              session.events[eventIndex].screenshot = {
+                id: screenshot.id,
+                filename: `${screenshot.id}.png`,
+                timestamp: screenshot.timestamp,
+                eventType: screenshot.eventType
+              };
+            }
+          }
+        } catch (screenshotError) {
+          this.logError('Failed to capture screenshot for event:', screenshotError);
+        }
+      }
       
       // Correlate with recent network requests
       this.correlateNetworkRequests(event, session);
@@ -539,7 +580,125 @@ class FioriTestBackground {
       
       // Broadcast updated session state
       this.broadcastSessionUpdate(tabId);
+    } else {
+      // Log why event was rejected
+      if (!session) {
+        this.log(`Event rejected: No session found for tab ${tabId}`);
+      } else if (!session.isRecording) {
+        this.log(`Event rejected: Session not recording for tab ${tabId}`);
+      } else if (session.isPaused) {
+        this.log(`Event rejected: Session is paused for tab ${tabId}`);
+      }
     }
+  }
+
+  shouldCaptureScreenshotForEvent(event) {
+    // Capture screenshots for visual events (not for every input keystroke)
+    const screenshotEvents = [
+      'click', 
+      'editing_start', 
+      'editing_end', 
+      'submit', 
+      'keyboard', // Only for important key presses
+      'file_upload'
+    ];
+    
+    return screenshotEvents.includes(event.type);
+  }
+
+  generateSequentialEventId(session) {
+    // Generate sequential event ID (001, 002, 003, etc.)
+    const eventNumber = (session.events?.length || 0) + 1;
+    return eventNumber.toString().padStart(3, '0');
+  }
+
+  async updateSessionNameIfNeeded(session, event, eventData) {
+    // Only update name if we're still using the default/launchpad name
+    const currentName = session.metadata.sessionName || '';
+    const isDefaultName = currentName.includes('Launchpad') || 
+                         currentName.includes('Session ') ||
+                         currentName === session.metadata.originalSessionName;
+
+    if (!isDefaultName) {
+      return; // User has already navigated to a specific app
+    }
+
+    // Check if this event indicates navigation to a specific app
+    const meaningfulAppName = this.extractMeaningfulAppName(event, eventData);
+    
+    if (meaningfulAppName && meaningfulAppName !== currentName) {
+      this.log(`Updating session name from "${currentName}" to "${meaningfulAppName}"`);
+      session.metadata.sessionName = meaningfulAppName;
+      session.metadata.nameUpdatedAt = Date.now();
+      session.metadata.nameUpdatedReason = 'first-meaningful-event';
+    }
+  }
+
+  extractMeaningfulAppName(event, eventData) {
+    // Method 1: From current page URL
+    if (eventData.pageUrl) {
+      const appName = this.generateImprovedSessionNameFromUrl(eventData.pageUrl);
+      if (appName && !appName.includes('Launchpad')) {
+        return appName;
+      }
+    }
+
+    // Method 2: From UI5 app semantics
+    if (eventData.ui5Context?.appSemantics?.appType && 
+        eventData.ui5Context.appSemantics.appType !== 'unknown') {
+      return this.formatAppNameFromSemantics(eventData.ui5Context.appSemantics);
+    }
+
+    // Method 3: From page title if available
+    if (eventData.pageTitle && 
+        !eventData.pageTitle.includes('Launchpad') && 
+        !eventData.pageTitle.includes('Home')) {
+      return eventData.pageTitle.slice(0, 50); // Limit length
+    }
+
+    // Method 4: From DOM context (e.g., clicked on specific app tile)
+    if (event.type === 'click' && eventData.element) {
+      const appName = this.extractAppNameFromElement(eventData.element);
+      if (appName) {
+        return appName;
+      }
+    }
+
+    return null;
+  }
+
+  formatAppNameFromSemantics(semantics) {
+    if (semantics.appType === 'manage-alerts') {
+      return 'Manage Alerts';
+    } else if (semantics.appType === 'manage-detection-methods') {
+      return 'Manage Detection Methods';
+    } else if (semantics.businessObject) {
+      return `Manage ${semantics.businessObject}`;
+    } else {
+      return semantics.appType.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+  }
+
+  extractAppNameFromElement(element) {
+    // Look for app tile clicks
+    if (element.className?.includes('sapUshellTile') || 
+        element.className?.includes('sapMTile')) {
+      
+      // Try to find title in the element or its children
+      const titleElement = element.querySelector?.('.sapMTileTitle, .sapUshellTileTitle') ||
+                          element.closest?.('.sapUshellTile')?.querySelector('.sapMTileTitle');
+      
+      if (titleElement?.textContent) {
+        return titleElement.textContent.trim();
+      }
+      
+      // Fallback to element text content
+      if (element.textContent && element.textContent.length < 100) {
+        return element.textContent.trim();
+      }
+    }
+
+    return null;
   }
 
   addEventWithCoalescing(session, newEvent) {
@@ -1087,7 +1246,7 @@ class FioriTestBackground {
   }
 
 
-  async captureTabScreenshot(tabId, elementInfo, eventType = null) {
+  async captureTabScreenshot(tabId, elementInfo, eventType = null, eventId = null) {
     try {
       // Get the current tab info
       const tab = await chrome.tabs.get(tabId);
@@ -1095,13 +1254,16 @@ class FioriTestBackground {
         throw new Error('Tab not found');
       }
 
+      // Get current session for context
+      const session = this.sessions.get(tabId);
+
       const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, {
         format: 'png',
         quality: 90
       });
       
-      // Generate unique screenshot ID
-      const screenshotId = this.generateScreenshotId(eventType);
+      // Generate semantic screenshot ID
+      const screenshotId = this.generateScreenshotId(eventType, eventId, session, elementInfo);
       
       const screenshotData = {
         id: screenshotId,
@@ -1110,6 +1272,7 @@ class FioriTestBackground {
         tabId: tabId,
         elementInfo: elementInfo || null,
         eventType: eventType,
+        eventId: eventId,
         pageInfo: {
           url: tab.url,
           title: tab.title,
@@ -1134,10 +1297,113 @@ class FioriTestBackground {
     }
   }
 
-  generateScreenshotId(eventType = 'manual') {
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 8);
-    return `screenshot_${eventType || 'event'}_${timestamp}_${random}`;
+  generateScreenshotId(eventType = 'manual', eventId = null, session = null, elementInfo = null) {
+    // Generate semantic screenshot name: 001_click_manage-alerts_button-save
+    const parts = [];
+    
+    // Part 1: Sequential event ID (001, 002, 003...)
+    if (eventId) {
+      parts.push(eventId);
+    } else {
+      const timestamp = Date.now();
+      parts.push(timestamp.toString());
+    }
+    
+    // Part 2: Event type
+    parts.push(eventType || 'event');
+    
+    // Part 3: App context (if available)
+    if (session?.metadata?.appSemantics?.appType) {
+      parts.push(session.metadata.appSemantics.appType);
+    } else if (session?.metadata?.sessionName) {
+      const appSlug = session.metadata.sessionName
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '-')
+        .replace(/-+/g, '-')
+        .slice(0, 20);
+      parts.push(appSlug);
+    }
+    
+    // Part 4: Element semantics (if available)
+    if (elementInfo) {
+      const elementSemantics = this.generateElementSemantics(elementInfo);
+      if (elementSemantics) {
+        parts.push(elementSemantics);
+      }
+    }
+    
+    return parts.join('_');
+  }
+
+  generateElementSemantics(elementInfo) {
+    if (!elementInfo) return null;
+    
+    // Button semantics
+    if (elementInfo.tagName === 'BUTTON' || 
+        elementInfo.className?.includes('Btn') ||
+        elementInfo.className?.includes('Button')) {
+      
+      const buttonText = elementInfo.textContent?.trim()?.toLowerCase();
+      if (buttonText) {
+        if (buttonText.includes('save')) return 'button-save';
+        if (buttonText.includes('cancel')) return 'button-cancel';
+        if (buttonText.includes('delete')) return 'button-delete';
+        if (buttonText.includes('edit')) return 'button-edit';
+        if (buttonText.includes('create')) return 'button-create';
+        if (buttonText.includes('go')) return 'button-go';
+        if (buttonText.includes('search')) return 'button-search';
+        if (buttonText.includes('assign')) return 'button-assign';
+        
+        // Generic button with text
+        const cleanText = buttonText.replace(/[^a-z0-9]/g, '').slice(0, 10);
+        return `button-${cleanText}`;
+      }
+      
+      return 'button';
+    }
+    
+    // Input field semantics
+    if (elementInfo.tagName === 'INPUT') {
+      if (elementInfo.id) {
+        const idLower = elementInfo.id.toLowerCase();
+        if (idLower.includes('name')) return 'input-name';
+        if (idLower.includes('email')) return 'input-email';
+        if (idLower.includes('search')) return 'input-search';
+        if (idLower.includes('filter')) return 'input-filter';
+        if (idLower.includes('amount')) return 'input-amount';
+        if (idLower.includes('date')) return 'input-date';
+        
+        // Generic input with ID
+        const cleanId = idLower.replace(/[^a-z0-9]/g, '').slice(0, 10);
+        return `input-${cleanId}`;
+      }
+      
+      return 'input';
+    }
+    
+    // Link/Navigation semantics
+    if (elementInfo.tagName === 'A' || elementInfo.className?.includes('Link')) {
+      return 'link';
+    }
+    
+    // Table row/cell semantics
+    if (elementInfo.tagName === 'TR' || elementInfo.tagName === 'TD') {
+      return 'table-row';
+    }
+    
+    // Tile semantics (Fiori specific)
+    if (elementInfo.className?.includes('sapUshellTile') || 
+        elementInfo.className?.includes('sapMTile')) {
+      return 'tile';
+    }
+    
+    // List item semantics
+    if (elementInfo.className?.includes('sapMListItem') || 
+        elementInfo.tagName === 'LI') {
+      return 'list-item';
+    }
+    
+    return null;
   }
 
   cleanupOldScreenshots(tabId) {
