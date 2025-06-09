@@ -1757,21 +1757,397 @@ class FioriTestBackground {
   generateMermaidDiagrams(session, sequenceSummary, odataAnalysis) {
     let markdown = '';
 
-    // Generate Flow Diagram
-    markdown += `## Process Flow\n\n`;
-    markdown += '```mermaid\n';
-    markdown += this.generateFlowDiagram(session, sequenceSummary);
-    markdown += '```\n\n';
-
-    // Generate Sequence Diagram (if we have OData operations)
-    if (sequenceSummary.odataOperations.length > 0) {
-      markdown += `## Sequence Diagram\n\n`;
+    // Generate Business Process Flow (grouped operations)
+    const businessFlow = this.generateBusinessFlow(session, sequenceSummary, odataAnalysis);
+    if (businessFlow.operations.length > 0) {
+      markdown += `## Business Process Flow\n\n`;
       markdown += '```mermaid\n';
-      markdown += this.generateSequenceDiagram(session, sequenceSummary);
+      markdown += this.generateCleanFlowDiagram(businessFlow);
       markdown += '```\n\n';
     }
 
+    // Generate OData Operations Summary
+    if (sequenceSummary.odataOperations.length > 0 || odataAnalysis.operations.length > 0) {
+      markdown += `## OData Operations Summary\n\n`;
+      markdown += this.generateODataSummary(session, sequenceSummary, odataAnalysis);
+    }
+
     return markdown;
+  }
+
+  generateBusinessFlow(session, sequenceSummary, odataAnalysis) {
+    const businessFlow = {
+      operations: [],
+      modifyingOperations: [],
+      readOperations: [],
+      functions: []
+    };
+
+    // Group events into meaningful business operations
+    const meaningfulEvents = this.extractMeaningfulEvents(session.events || []);
+    
+    // Process OData operations
+    const odataOps = this.groupODataOperations(session.networkRequests || []);
+    
+    // Combine into business operations
+    meaningfulEvents.forEach(eventGroup => {
+      const operation = {
+        id: `OP${businessFlow.operations.length + 1}`,
+        type: eventGroup.type,
+        description: eventGroup.description,
+        events: eventGroup.events,
+        odataOperations: this.findRelatedODataOps(eventGroup, odataOps),
+        entities: eventGroup.entities || []
+      };
+      
+      businessFlow.operations.push(operation);
+      
+      // Categorize operations
+      if (operation.type === 'modify') {
+        businessFlow.modifyingOperations.push(operation);
+      } else if (operation.type === 'read') {
+        businessFlow.readOperations.push(operation);
+      } else if (operation.type === 'function') {
+        businessFlow.functions.push(operation);
+      }
+    });
+
+    return businessFlow;
+  }
+
+  extractMeaningfulEvents(events) {
+    const meaningfulGroups = [];
+    let currentGroup = null;
+    
+    events.forEach(event => {
+      // Skip noise events (editing_start, editing_end, redundant inputs)
+      if (this.isNoiseEvent(event)) {
+        return;
+      }
+      
+      // Detect new business operation
+      if (this.isBusinessOperationStart(event)) {
+        // Save previous group
+        if (currentGroup && currentGroup.events.length > 0) {
+          meaningfulGroups.push(currentGroup);
+        }
+        
+        // Start new group
+        currentGroup = {
+          type: this.classifyBusinessOperation(event),
+          description: this.extractBusinessDescription(event),
+          events: [event],
+          entities: this.extractEntitiesFromEvent(event)
+        };
+      } else if (currentGroup && this.isRelatedToCurrentOperation(event, currentGroup)) {
+        // Add to current group
+        currentGroup.events.push(event);
+      }
+    });
+    
+    // Add final group
+    if (currentGroup && currentGroup.events.length > 0) {
+      meaningfulGroups.push(currentGroup);
+    }
+    
+    return meaningfulGroups;
+  }
+
+  isNoiseEvent(event) {
+    // Filter out noise events
+    return event.type === 'editing_start' || 
+           event.type === 'editing_end' ||
+           (event.type === 'input' && (!event.value || event.value.trim() === '')) ||
+           (event.type === 'click' && !event.element?.textContent?.trim());
+  }
+
+  isBusinessOperationStart(event) {
+    // Detect start of meaningful business operations
+    if (event.type === 'click') {
+      const text = event.element?.textContent?.trim().toLowerCase() || '';
+      const id = event.element?.id?.toLowerCase() || '';
+      
+      // Button clicks that start operations
+      return text.includes('save') || 
+             text.includes('assign') || 
+             text.includes('go') || 
+             text.includes('search') ||
+             text.includes('edit') ||
+             text.includes('create') ||
+             text.includes('delete') ||
+             id.includes('button') ||
+             id.includes('btn');
+    }
+    
+    // Form submissions
+    if (event.type === 'submit') {
+      return true;
+    }
+    
+    // Meaningful navigation
+    if (event.type === 'click' && event.element?.tagName === 'SPAN' && 
+        event.element?.textContent?.includes('Manage')) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  classifyBusinessOperation(event) {
+    const text = event.element?.textContent?.trim().toLowerCase() || '';
+    const url = event.pageUrl || '';
+    
+    if (text.includes('save') || text.includes('edit')) return 'modify';
+    if (text.includes('assign')) return 'function';
+    if (text.includes('search') || text.includes('go')) return 'read';
+    if (text.includes('manage') || url.includes('manage')) return 'navigation';
+    
+    return 'action';
+  }
+
+  extractBusinessDescription(event) {
+    const text = event.element?.textContent?.trim() || '';
+    const id = event.element?.id || '';
+    
+    if (text) {
+      return `${this.classifyBusinessOperation(event)}: ${text}`;
+    } else if (id) {
+      return `${this.classifyBusinessOperation(event)}: ${id.split('-').pop()}`;
+    }
+    
+    return `${this.classifyBusinessOperation(event)} operation`;
+  }
+
+  extractEntitiesFromEvent(event) {
+    const entities = [];
+    const url = event.pageUrl || '';
+    
+    // Extract from URL
+    if (url.includes('DetectionMethod')) entities.push('DetectionMethod');
+    if (url.includes('Alert')) entities.push('Alert');
+    if (url.includes('ComplianceAlert')) entities.push('ComplianceAlert');
+    
+    return entities;
+  }
+
+  isRelatedToCurrentOperation(event, currentGroup) {
+    // Check if event is part of current operation (e.g., input following a click)
+    const timeDiff = event.timestamp - currentGroup.events[currentGroup.events.length - 1].timestamp;
+    return timeDiff < 10000; // 10 seconds max gap
+  }
+
+  groupODataOperations(networkRequests) {
+    const grouped = {
+      modifying: [],
+      reading: [],
+      functions: []
+    };
+
+    networkRequests.forEach(request => {
+      if (!request.type?.includes('odata')) return;
+      
+      const operation = {
+        method: request.method,
+        url: request.url,
+        entity: this.extractEntityFromUrl(request.url),
+        type: this.classifyODataOperation(request),
+        body: this.extractODataPayload(request),
+        timestamp: request.timestamp
+      };
+
+      if (operation.type === 'modify') {
+        grouped.modifying.push(operation);
+      } else if (operation.type === 'function') {
+        grouped.functions.push(operation);
+      } else {
+        grouped.reading.push(operation);
+      }
+    });
+
+    return grouped;
+  }
+
+  classifyODataOperation(request) {
+    if (request.method === 'POST' && request.url.includes('$batch')) {
+      const body = request.requestBody || '';
+      if (typeof body === 'string' && body.includes('MERGE')) return 'modify';
+      if (typeof body === 'string' && body.includes('GET')) return 'read';
+    }
+    
+    if (request.method === 'MERGE' || request.method === 'PUT' || request.method === 'PATCH') {
+      return 'modify';
+    }
+    
+    if (request.method === 'POST' && !request.url.includes('$batch')) {
+      return 'function';
+    }
+    
+    return 'read';
+  }
+
+  extractODataPayload(request) {
+    if (!request.requestBody) return null;
+    
+    if (typeof request.requestBody === 'string') {
+      // Extract meaningful parts from body
+      const lines = request.requestBody.split('\n');
+      const meaningfulLines = lines.filter(line => 
+        line.includes('"') && 
+        !line.includes('Content-Type') && 
+        !line.includes('HTTP/1.1')
+      );
+      
+      return meaningfulLines.slice(0, 3).join('\n').slice(0, 200);
+    }
+    
+    return JSON.stringify(request.requestBody).slice(0, 200);
+  }
+
+  findRelatedODataOps(eventGroup, odataOps) {
+    const related = [];
+    const groupStartTime = eventGroup.events[0].timestamp;
+    const groupEndTime = eventGroup.events[eventGroup.events.length - 1].timestamp;
+    
+    // Find OData operations within 5 seconds of the event group
+    [...odataOps.modifying, ...odataOps.reading, ...odataOps.functions].forEach(op => {
+      const timeDiff = Math.abs(op.timestamp - groupEndTime);
+      if (timeDiff < 5000) { // 5 seconds
+        related.push(op);
+      }
+    });
+    
+    return related;
+  }
+
+  generateCleanFlowDiagram(businessFlow) {
+    let diagram = 'flowchart TD\n';
+    diagram += '    Start([User starts session])\n';
+    
+    let previousNode = 'Start';
+    
+    businessFlow.operations.forEach((operation, index) => {
+      const nodeId = operation.id;
+      let nodeShape = '[]'; // rectangle
+      let nodeClass = '';
+      
+      // Choose shape and class based on operation type
+      switch (operation.type) {
+        case 'modify':
+          nodeShape = '{}'; // rhombus
+          nodeClass = 'modifyOp';
+          break;
+        case 'function':
+          nodeShape = '(('; // circle
+          nodeClass = 'functionOp';
+          break;
+        case 'read':
+          nodeShape = '()'; // rounded rectangle
+          nodeClass = 'readOp';
+          break;
+        case 'navigation':
+          nodeShape = '[]'; // rectangle
+          nodeClass = 'navOp';
+          break;
+      }
+      
+      const label = operation.description.length > 30 ? 
+        operation.description.slice(0, 30) + '...' : 
+        operation.description;
+      
+      if (nodeShape === '((') {
+        diagram += `    ${nodeId}((${label}))\n`;
+      } else {
+        diagram += `    ${nodeId}${nodeShape[0]}${label}${nodeShape[1] || nodeShape[0]}\n`;
+      }
+      
+      diagram += `    ${previousNode} --> ${nodeId}\n`;
+      
+      // Add OData operations as annotations
+      if (operation.odataOperations.length > 0) {
+        operation.odataOperations.forEach((odataOp, odataIndex) => {
+          const odataNodeId = `${nodeId}_OD${odataIndex}`;
+          diagram += `    ${odataNodeId}[${odataOp.method} ${odataOp.entity || 'Entity'}]\n`;
+          diagram += `    ${nodeId} -.-> ${odataNodeId}\n`;
+        });
+      }
+      
+      previousNode = nodeId;
+    });
+
+    diagram += `    ${previousNode} --> End([Session completed])\n`;
+    
+    // Add styling
+    diagram += '\n    classDef modifyOp fill:#ffebee,stroke:#f44336\n';
+    diagram += '    classDef functionOp fill:#e8f5e8,stroke:#4caf50\n';
+    diagram += '    classDef readOp fill:#e3f2fd,stroke:#2196f3\n';
+    diagram += '    classDef navOp fill:#fff3e0,stroke:#ff9800\n';
+
+    return diagram;
+  }
+
+  generateODataSummary(session, sequenceSummary, odataAnalysis) {
+    let summary = '';
+    
+    // Group operations by type
+    const modifyingOps = [];
+    const readOps = [];
+    const functionOps = [];
+    
+    (session.networkRequests || []).forEach(request => {
+      if (!request.type?.includes('odata')) return;
+      
+      const op = {
+        method: request.method,
+        url: request.url,
+        entity: this.extractEntityFromUrl(request.url),
+        type: this.classifyODataOperation(request),
+        body: this.extractODataPayload(request),
+        timestamp: request.timestamp
+      };
+      
+      if (op.type === 'modify') modifyingOps.push(op);
+      else if (op.type === 'function') functionOps.push(op);
+      else readOps.push(op);
+    });
+    
+    // Modifying Operations First
+    if (modifyingOps.length > 0) {
+      summary += `### 🔄 Modifying Operations\n\n`;
+      modifyingOps.forEach((op, index) => {
+        const entity = op.entity || 'Unknown';
+        const payload = op.body ? `\n\`\`\`\n${op.body}\n\`\`\`` : '';
+        summary += `${index + 1}. **${op.method} ${entity}**${payload}\n\n`;
+      });
+    }
+    
+    // Function Calls
+    if (functionOps.length > 0) {
+      summary += `### ⚙️ Function Calls\n\n`;
+      functionOps.forEach((op, index) => {
+        const entity = op.entity || this.extractFunctionName(op.url);
+        const payload = op.body ? `\n\`\`\`\n${op.body}\n\`\`\`` : '';
+        summary += `${index + 1}. **Function: ${entity}**${payload}\n\n`;
+      });
+    }
+    
+    // Read Operations (grouped by entity)
+    if (readOps.length > 0) {
+      summary += `### 📖 Read Operations\n\n`;
+      const entitiesRead = [...new Set(readOps.map(op => op.entity).filter(e => e))];
+      entitiesRead.forEach(entity => {
+        const entityOps = readOps.filter(op => op.entity === entity);
+        summary += `- **${entity}**: ${entityOps.length} read operation${entityOps.length > 1 ? 's' : ''}\n`;
+      });
+      summary += '\n';
+    }
+    
+    return summary;
+  }
+
+  extractFunctionName(url) {
+    // Extract function name from URL
+    const match = url.match(/\/([A-Z][a-zA-Z0-9_]+)(?:\(|\?|$)/);
+    return match ? match[1] : 'Function';
   }
 
   generateFlowDiagram(session, sequenceSummary) {
