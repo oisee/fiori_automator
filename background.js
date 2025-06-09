@@ -88,24 +88,26 @@ class FioriTestBackground {
   }
 
   handleBeforeRequest(details) {
-    if (this.isODataRequest(details.url)) {
+    if (this.isRelevantRequest(details.url, details.method)) {
       const requestData = {
         requestId: this.generateUUID(),
         tabId: details.tabId,
         url: details.url,
         method: details.method,
         timestamp: Date.now(),
-        requestBody: details.requestBody
+        requestBody: this.extractRequestBody(details.requestBody),
+        type: this.classifyRequestType(details.url, details.method)
       };
 
-      this.log('OData request intercepted:', {
+      this.log('Request intercepted:', {
         url: details.url,
         method: details.method,
+        type: requestData.type,
         requestId: requestData.requestId
       });
 
       this.networkRequests.set(details.requestId, requestData);
-      this.notifyContentScript(details.tabId, 'odata-request-started', requestData);
+      this.notifyContentScript(details.tabId, 'request-started', requestData);
     }
   }
 
@@ -128,14 +130,18 @@ class FioriTestBackground {
 
   handleRequestCompleted(details) {
     const requestData = this.networkRequests.get(details.requestId);
-    if (requestData && this.isODataRequest(details.url)) {
+    if (requestData && this.isRelevantRequest(details.url, details.method)) {
       requestData.endTime = Date.now();
       requestData.duration = requestData.endTime - requestData.timestamp;
       
       // Try to get response body
       this.getResponseBody(details.requestId).then(responseBody => {
         requestData.responseBody = responseBody;
-        this.notifyContentScript(details.tabId, 'odata-request-completed', requestData);
+        
+        // Add to session's network requests
+        this.addNetworkRequestToSession(details.tabId, requestData);
+        
+        this.notifyContentScript(details.tabId, 'request-completed', requestData);
       });
 
       // Clean up after processing
@@ -156,12 +162,95 @@ class FioriTestBackground {
     }
   }
 
+  isRelevantRequest(url, method) {
+    // Capture data modification requests and OData calls
+    const isDataModifying = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+    const isOData = this.isODataRequest(url);
+    const isSAPRequest = this.isSAPRequest(url);
+    
+    return isOData || (isDataModifying && isSAPRequest);
+  }
+
   isODataRequest(url) {
     return url.includes('$metadata') || 
            url.includes('sap/opu/odata') ||
            url.includes('$batch') ||
            url.includes('$format=json') ||
-           /\/odata\//.test(url);
+           /\/odata\//.test(url) ||
+           url.includes('/odata/');
+  }
+
+  isSAPRequest(url) {
+    return url.includes('/sap/') || 
+           url.includes('sap-client=') ||
+           url.includes('.sap.com') ||
+           url.includes('sapsb') ||
+           url.includes('sapui5');
+  }
+
+  classifyRequestType(url, method) {
+    if (this.isODataRequest(url)) {
+      if (url.includes('$batch')) return 'odata-batch';
+      if (url.includes('$metadata')) return 'odata-metadata';
+      return 'odata';
+    }
+    
+    if (this.isSAPRequest(url)) {
+      return `sap-${method.toLowerCase()}`;
+    }
+    
+    return `${method.toLowerCase()}`;
+  }
+
+  extractRequestBody(requestBody) {
+    if (!requestBody) return null;
+    
+    try {
+      if (requestBody.raw && requestBody.raw.length > 0) {
+        const decoder = new TextDecoder();
+        const combined = requestBody.raw.map(item => {
+          if (item.bytes) {
+            return decoder.decode(item.bytes);
+          }
+          return '';
+        }).join('');
+        
+        // Try to parse as JSON
+        try {
+          return JSON.parse(combined);
+        } catch {
+          return combined; // Return as string if not JSON
+        }
+      }
+      
+      if (requestBody.formData) {
+        return { formData: requestBody.formData };
+      }
+      
+      return requestBody;
+    } catch (error) {
+      this.log('Error extracting request body:', error);
+      return null;
+    }
+  }
+
+  addNetworkRequestToSession(tabId, requestData) {
+    const session = this.sessions.get(tabId);
+    if (session && session.isRecording) {
+      // Clean the request data before adding
+      const cleanedRequest = this.cleanNetworkData(requestData);
+      session.networkRequests.push(cleanedRequest);
+      
+      this.log(`Network request added to session: ${requestData.method} ${requestData.url}`);
+      
+      // Auto-save session periodically
+      if (session.networkRequests.length % 5 === 0) {
+        this.autoSaveSession(session);
+      }
+      
+      // Broadcast session update
+      this.broadcastSessionUpdate(tabId);
+    }
   }
 
   async handleMessage(message, sender, sendResponse) {
@@ -485,10 +574,15 @@ class FioriTestBackground {
         tabId: request.tabId,
         url: request.url,
         method: request.method,
+        type: request.type,
         timestamp: request.timestamp,
         endTime: request.endTime,
         duration: request.duration,
         statusCode: request.statusCode,
+        requestHeaders: this.cleanHeaders(request.requestHeaders),
+        responseHeaders: this.cleanHeaders(request.responseHeaders),
+        requestBody: this.cleanBody(request.requestBody),
+        responseBody: this.cleanBody(request.responseBody),
         correlation: request.correlation
       };
     } catch (error) {
@@ -496,8 +590,45 @@ class FioriTestBackground {
         requestId: request.requestId,
         url: request.url,
         method: request.method,
+        type: request.type || 'unknown',
         timestamp: request.timestamp
       };
+    }
+  }
+
+  cleanHeaders(headers) {
+    if (!headers || !Array.isArray(headers)) return [];
+    
+    // Filter out sensitive headers and keep relevant ones
+    const relevantHeaders = [
+      'content-type', 'content-length', 'accept', 'accept-language',
+      'x-csrf-token', 'x-sap-request-id', 'sap-contextid', 'sap-cancel-on-close'
+    ];
+    
+    return headers.filter(header => {
+      const name = header.name?.toLowerCase();
+      return relevantHeaders.includes(name) && !name.includes('authorization');
+    });
+  }
+
+  cleanBody(body) {
+    if (!body) return null;
+    
+    try {
+      // If it's already an object, stringify and limit size
+      if (typeof body === 'object') {
+        const jsonString = JSON.stringify(body);
+        return jsonString.length > 10000 ? jsonString.substring(0, 10000) + '...[truncated]' : body;
+      }
+      
+      // If it's a string, limit size
+      if (typeof body === 'string') {
+        return body.length > 10000 ? body.substring(0, 10000) + '...[truncated]' : body;
+      }
+      
+      return body;
+    } catch (error) {
+      return '[Error serializing body]';
     }
   }
 

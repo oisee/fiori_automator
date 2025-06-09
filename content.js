@@ -127,8 +127,8 @@ class FioriTestCapture {
         sendResponse({ success: true, context: this.ui5Context });
         break;
 
-      case 'odata-request-started':
-      case 'odata-request-completed':
+      case 'request-started':
+      case 'request-completed':
         // Handle network request notifications from background script
         this.handleNetworkEvent(message.type, message.data);
         sendResponse({ success: true });
@@ -511,29 +511,34 @@ class FioriTestCapture {
     // Log network events for debugging
     console.log(`Network event: ${type}`, data);
     
-    // Could be used to show real-time network activity in UI
-    if (type === 'odata-request-completed') {
+    // Show notification for completed requests
+    if (type === 'request-completed') {
       this.showNetworkNotification(data);
     }
   }
 
   showNetworkNotification(requestData) {
-    // Show a brief notification about OData request
+    // Show a brief notification about network request
     if (this.isRecording) {
       const notification = document.createElement('div');
+      const color = this.getNotificationColor(requestData.type);
+      
       notification.style.cssText = `
         position: fixed;
         top: 10px;
         right: 10px;
-        background: #2196F3;
+        background: ${color};
         color: white;
         padding: 8px 12px;
         border-radius: 4px;
         font-size: 12px;
         z-index: 999999;
-        opacity: 0.8;
+        opacity: 0.9;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
       `;
-      notification.textContent = `OData: ${requestData.method} ${requestData.url.split('/').pop()}`;
+      
+      const urlPart = requestData.url.split('/').pop() || requestData.url.substring(requestData.url.lastIndexOf('/') + 1, requestData.url.lastIndexOf('/') + 20);
+      notification.textContent = `${requestData.type.toUpperCase()}: ${requestData.method} ${urlPart}`;
       
       document.body.appendChild(notification);
       
@@ -541,7 +546,25 @@ class FioriTestCapture {
         if (notification.parentNode) {
           notification.parentNode.removeChild(notification);
         }
-      }, 2000);
+      }, 3000);
+    }
+  }
+
+  getNotificationColor(requestType) {
+    switch (requestType) {
+      case 'odata':
+      case 'odata-batch':
+        return '#2196F3'; // Blue for OData
+      case 'odata-metadata':
+        return '#9C27B0'; // Purple for metadata
+      case 'sap-post':
+      case 'sap-put':
+      case 'sap-patch':
+        return '#FF9800'; // Orange for SAP modifications
+      case 'sap-delete':
+        return '#F44336'; // Red for deletions
+      default:
+        return '#4CAF50'; // Green for others
     }
   }
 
