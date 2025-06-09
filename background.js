@@ -89,7 +89,7 @@ class FioriTestBackground {
   }
 
   handleBeforeRequest(details) {
-    if (this.isRelevantRequest(details.url, details.method)) {
+    if (this.isRelevantRequest(details.url, details.method, details.tabId)) {
       const requestData = {
         requestId: this.generateUUID(),
         tabId: details.tabId,
@@ -131,7 +131,7 @@ class FioriTestBackground {
 
   handleRequestCompleted(details) {
     const requestData = this.networkRequests.get(details.requestId);
-    if (requestData && this.isRelevantRequest(details.url, details.method)) {
+    if (requestData && this.isRelevantRequest(details.url, details.method, details.tabId)) {
       requestData.endTime = Date.now();
       requestData.duration = requestData.endTime - requestData.timestamp;
       
@@ -168,15 +168,72 @@ class FioriTestBackground {
     }
   }
 
-  isRelevantRequest(url, method) {
-    // Capture ALL requests for SAP applications and OData
+  isRelevantRequest(url, method, tabId) {
+    // Check if filtering is enabled for this session
+    const session = this.sessions.get(tabId);
+    const filterJSRequests = session?.metadata?.filterJSRequests !== false; // Default to true
+    
+    // Always capture these important request types regardless of filtering
     const isOData = this.isODataRequest(url);
     const isSAPRequest = this.isSAPRequest(url);
     const isDataModifying = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
     const isAuthOrToken = this.isAuthRequest(url);
     
-    // Record all SAP-related requests, OData, and authentication/token requests
-    return isOData || isSAPRequest || isAuthOrToken || (isDataModifying && this.isWebAppRequest(url));
+    // If it's a critical request type, always capture
+    if (isOData || isAuthOrToken || isDataModifying) {
+      return true;
+    }
+    
+    // If filtering is enabled, filter out static assets
+    if (filterJSRequests && this.isStaticAssetRequest(url)) {
+      return false;
+    }
+    
+    // Check for other SAP-related requests
+    if (isSAPRequest) {
+      return true;
+    }
+    
+    // Check for web app requests (non-static)
+    return this.isWebAppRequest(url);
+  }
+  
+  isStaticAssetRequest(url) {
+    // Extended list of static assets to filter out
+    const staticExtensions = [
+      '.js', '.css', '.map', // JavaScript and CSS
+      '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', // Images
+      '.woff', '.woff2', '.ttf', '.eot', // Fonts
+      '.mp4', '.mp3', '.avi', '.wav', // Media
+      '.pdf', '.doc', '.docx', '.xls', '.xlsx', // Documents
+      '.zip', '.tar', '.gz' // Archives
+    ];
+    
+    // Check for common static asset patterns
+    const staticPatterns = [
+      /\/resources\/.*\.(js|css)/, // UI5 resources
+      /\/static\//, // Static folder
+      /\/assets\//, // Assets folder
+      /\/dist\//, // Distribution folder
+      /\/build\//, // Build folder
+      /\/node_modules\//, // Node modules
+      /\/vendors?\//, // Vendor files
+      /\/libs?\//, // Library files
+      /cache-buster/, // Cache buster files
+      /\.min\.(js|css)/, // Minified files
+      /jquery.*\.js/, // jQuery files
+      /bootstrap.*\.(js|css)/, // Bootstrap files
+      /font-awesome/, // Font awesome
+      /favicon\.ico/ // Favicon
+    ];
+    
+    // Check extensions
+    const hasStaticExtension = staticExtensions.some(ext => url.toLowerCase().includes(ext));
+    
+    // Check patterns
+    const matchesStaticPattern = staticPatterns.some(pattern => pattern.test(url));
+    
+    return hasStaticExtension || matchesStaticPattern;
   }
 
   isAuthRequest(url) {
@@ -303,7 +360,7 @@ class FioriTestBackground {
       this.log('Received message:', message.type);
       
       switch (message.type) {
-        case 'start-recording':
+        case 'start-recording': {
           const tabId = sender.tab?.id || message.tabId;
           if (!tabId) {
             throw new Error('No tab ID available');
@@ -311,21 +368,24 @@ class FioriTestBackground {
           await this.startRecording(tabId, message.data);
           sendResponse({ success: true });
           break;
+        }
 
         case 'stop-recording':
           await this.stopRecording(sender.tab?.id || message.tabId);
           sendResponse({ success: true });
           break;
 
-        case 'get-session-data':
+        case 'get-session-data': {
           const sessionData = await this.getSessionData(sender.tab?.id || message.tabId);
           sendResponse({ success: true, data: sessionData });
           break;
+        }
 
-        case 'get-recording-state':
+        case 'get-recording-state': {
           const recordingState = await this.getRecordingState(sender.tab?.id || message.tabId);
           sendResponse({ success: true, data: recordingState });
           break;
+        }
 
         case 'pause-recording':
           await this.pauseRecording(sender.tab?.id || message.tabId);
@@ -342,20 +402,22 @@ class FioriTestBackground {
           sendResponse({ success: true });
           break;
 
-        case 'get-sessions':
+        case 'get-sessions': {
           const sessions = await this.getAllSessions();
           sendResponse({ success: true, data: sessions });
           break;
+        }
 
-        case 'capture-event':
+        case 'capture-event': {
           const eventTabId = sender.tab?.id || message.tabId;
           this.log('Received capture-event message from tab:', eventTabId, 'Event type:', message.data?.type);
           await this.captureEvent(eventTabId, message.data);
           this.log('Event processed successfully');
           sendResponse({ success: true });
           break;
+        }
 
-        case 'capture-screenshot':
+        case 'capture-screenshot': {
           const screenshot = await this.captureTabScreenshot(
             sender.tab?.id || message.tabId, 
             message.elementInfo, 
@@ -364,17 +426,27 @@ class FioriTestBackground {
           );
           sendResponse({ success: true, screenshot });
           break;
+        }
 
-        case 'export-session-markdown':
-          const exportResult = await this.exportSessionAsMarkdown(message.sessionId || sender.tab?.id || message.tabId);
-          sendResponse({ 
-            success: true, 
-            zipData: exportResult.content, 
-            filename: exportResult.filename 
-          });
+        case 'export-session-markdown': {
+          try {
+            const exportResult = await this.exportSessionAsMarkdown(message.sessionId || sender.tab?.id || message.tabId);
+            sendResponse({ 
+              success: true, 
+              zipData: exportResult.content, 
+              filename: exportResult.filename 
+            });
+          } catch (error) {
+            this.logError('Markdown export failed:', error);
+            sendResponse({ 
+              success: false, 
+              error: `Markdown export failed: ${error.message}` 
+            });
+          }
           break;
+        }
 
-        case 'export-session-screenshots':
+        case 'export-session-screenshots': {
           const screenshotResult = await this.exportSessionScreenshots(message.sessionId || sender.tab?.id || message.tabId);
           sendResponse({ 
             success: true, 
@@ -383,6 +455,7 @@ class FioriTestBackground {
             filename: screenshotResult.filename
           });
           break;
+        }
 
         default:
           sendResponse({ success: false, error: 'Unknown message type' });

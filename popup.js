@@ -154,6 +154,7 @@ class FioriTestPopup {
         captureScreenshots: document.getElementById('captureScreenshots').checked,
         captureUI5Context: document.getElementById('captureUI5Context').checked,
         autoCorrelation: document.getElementById('autoCorrelation').checked,
+        filterJSRequests: document.getElementById('filterJSRequests').checked,
         applicationUrl: this.currentTab.url,
         timestamp: Date.now()
       };
