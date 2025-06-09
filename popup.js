@@ -73,34 +73,10 @@ class FioriTestPopup {
     document.getElementById('settingsBtn').addEventListener('click', () => this.openSettings());
     document.getElementById('helpBtn').addEventListener('click', () => this.openHelp());
     document.getElementById('popoutBtn').addEventListener('click', () => this.openInWindow());
-    document.getElementById('exportBtn').addEventListener('click', () => this.exportSession());
-    
-    // Add markdown export button if it exists
-    const markdownExportBtn = document.getElementById('exportMarkdownBtn');
-    if (markdownExportBtn) {
-      markdownExportBtn.addEventListener('click', () => this.exportSessionAsMarkdown());
-    }
-
-    // Add ZIP export button if it exists
-    const zipExportBtn = document.getElementById('exportZipBtn');
-    if (zipExportBtn) {
-      zipExportBtn.addEventListener('click', () => this.exportSessionAsZip());
-    }
-
     // Add manual screenshot button if it exists
     const manualScreenshotBtn = document.getElementById('manualScreenshotBtn');
     if (manualScreenshotBtn) {
       manualScreenshotBtn.addEventListener('click', () => this.captureManualScreenshot());
-    }
-
-    // Add audio export button if it exists
-    const audioExportBtn = document.getElementById('exportAudioBtn');
-    console.log('Audio export button found:', !!audioExportBtn);
-    if (audioExportBtn) {
-      audioExportBtn.addEventListener('click', () => this.exportSessionAudio());
-      console.log('Audio export button event listener added');
-    } else {
-      console.warn('Audio export button not found in DOM');
     }
 
     // Listen for background script messages
