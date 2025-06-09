@@ -1448,9 +1448,18 @@ class FioriTestBackground {
     const sessionNameShort = session ? this.extractConciseSessionName(session) : 'session';
     
     // Format event ID with leading zeros (0001, 0002, etc.)
-    const formattedEventId = eventId ? 
-      eventId.toString().padStart(4, '0') : 
-      Date.now().toString().slice(-4).padStart(4, '0');
+    // If no eventId provided, generate next sequential number from session
+    let formattedEventId;
+    if (eventId) {
+      formattedEventId = eventId.toString().padStart(4, '0');
+    } else if (session) {
+      // Generate next sequential ID based on current session events
+      const nextEventNumber = (session.events?.length || 0) + 1;
+      formattedEventId = nextEventNumber.toString().padStart(4, '0');
+    } else {
+      // Last resort - use a sequential number based on current time
+      formattedEventId = '9999';
+    }
     
     // Clean event type
     const cleanEventType = (eventType || 'event').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -2492,17 +2501,37 @@ class FioriTestBackground {
     const sessionName = session.metadata?.sessionName || '';
     const url = session.metadata?.applicationUrl || '';
     
-    // Method 1: Use existing session name if it's good
-    if (sessionName && !sessionName.startsWith('Session ') && sessionName.length <= 20) {
-      return this.cleanNameForFilename(sessionName);
+    this.log('Extracting concise session name:', { sessionName, url });
+    
+    // Method 1: Always prioritize actual session name if it's meaningful
+    if (sessionName && sessionName !== 'Session' && !sessionName.startsWith('Session ')) {
+      // Handle specific patterns first for known app names
+      const lowerName = sessionName.toLowerCase();
+      if (lowerName.includes('manage') && lowerName.includes('detection')) {
+        this.log('Using manage-detection-methods pattern');
+        return 'manage-detection-methods';
+      }
+      if (lowerName.includes('manage') && lowerName.includes('alert')) {
+        this.log('Using manage-alerts pattern');
+        return 'manage-alerts';
+      }
+      if (lowerName.includes('launchpad') || lowerName.includes('home')) {
+        this.log('Using launchpad-home pattern');
+        return 'launchpad-home';
+      }
+      
+      // General processing - clean the session name directly
+      const cleanedName = this.cleanNameForFilename(sessionName);
+      this.log('Using cleaned session name:', cleanedName);
+      return cleanedName;
     }
     
-    // Method 2: Extract from URL patterns
+    // Method 2: Extract from URL patterns (only if no session name)
     if (url.includes('ComplianceAlert-manage') || url.includes('AlertManagement-manage')) {
       return 'manage-alerts';
     }
     if (url.includes('DetectionMethod-manage')) {
-      return 'detection-methods';
+      return 'manage-detection-methods';
     }
     if (url.includes('Shell-home')) {
       return 'launchpad-home';
@@ -2525,37 +2554,21 @@ class FioriTestBackground {
       return readable || 'fiori-app';
     }
     
-    // Method 4: Try to extract from full session name
-    if (sessionName) {
-      // Handle specific patterns first
-      const lowerName = sessionName.toLowerCase();
-      if (lowerName.includes('manage alerts')) {
-        return 'manage-alerts';
-      }
-      if (lowerName.includes('detection method')) {
-        return 'detection-methods';
-      }
-      if (lowerName.includes('launchpad')) {
-        return 'launchpad-home';
-      }
-      
-      // General processing - take up to 2 meaningful words
-      const words = sessionName
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter(word => word.length > 2 && word !== 'session')
-        .slice(0, 2);
-      
-      if (words.length > 0) {
-        return words.join('-');
-      }
-    }
-    
     return 'session';
   }
 
   cleanNameForFilename(name) {
+    const lowerName = name.toLowerCase();
+    
+    // Handle special cases that need more than 2 words
+    if (lowerName.includes('manage') && lowerName.includes('detection') && lowerName.includes('method')) {
+      return 'manage-detection-methods';
+    }
+    if (lowerName.includes('manage') && lowerName.includes('alert')) {
+      return 'manage-alerts';
+    }
+    
+    // General case - up to 2 words
     return name
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, ' ')
