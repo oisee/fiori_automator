@@ -559,10 +559,13 @@ class FioriTestBackground {
       session.duration = session.endTime - session.startTime - session.pausedTime;
 
       // Stop audio recording if it was enabled
+      let audioData = null;
       try {
-        const audioData = await this.stopAudioRecording(tabId);
+        audioData = await this.stopAudioRecording(tabId);
         if (audioData) {
           this.log('Audio recording stopped with session');
+          // Attach audio data to session before saving
+          session.audioData = audioData;
         }
       } catch (error) {
         this.logError('Failed to stop audio recording:', error);
@@ -571,7 +574,7 @@ class FioriTestBackground {
       // Notify content script to stop recording
       await this.notifyContentScript(tabId, 'stop-recording');
 
-      // Save session to storage
+      // Save session to storage (now includes audio data)
       await this.saveSession(session);
       
       // Broadcast state change
@@ -579,6 +582,12 @@ class FioriTestBackground {
       
       // Clean up session from memory after saving
       this.sessions.delete(tabId);
+      
+      // Clean up audio recording from memory
+      if (session.sessionId && this.audioRecordings.has(session.sessionId)) {
+        this.audioRecordings.delete(session.sessionId);
+        this.log('Audio recording cleaned up from memory');
+      }
     }
   }
 
@@ -2884,8 +2893,15 @@ class FioriTestBackground {
         throw new Error('Session not found');
       }
 
-      const audioData = this.audioRecordings.get(sessionData.sessionId);
-      if (!audioData || !audioData.chunks.length) {
+      // Check for audio data in session first (saved sessions)
+      let audioData = sessionData.audioData;
+      
+      // If not in session, check in-memory recordings (current session)
+      if (!audioData) {
+        audioData = this.audioRecordings.get(sessionData.sessionId);
+      }
+      
+      if (!audioData || !audioData.chunks || !audioData.chunks.length) {
         return null; // No audio recorded
       }
 
