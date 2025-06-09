@@ -172,16 +172,13 @@ class FioriTestPopup {
         this.updateRecordingState('recording');
         this.updateSessionInfo(sessionName);
         
-        // Notify content script
+        // Notify content script with retry
         try {
-          await chrome.tabs.sendMessage(this.currentTab.id, {
-            type: 'start-recording',
-            data: config
-          });
+          await this.ensureContentScriptAndNotify('start-recording', config);
           console.log('Content script notified');
         } catch (contentError) {
           console.warn('Could not notify content script:', contentError);
-          // This is okay - content script might not be injected yet
+          // Continue anyway - background script will handle injection
         }
         
         this.showSuccess('Recording started!');
@@ -230,10 +227,12 @@ class FioriTestPopup {
       if (response.success) {
         this.isRecording = false;
         
-        // Notify content script
-        await chrome.tabs.sendMessage(this.currentTab.id, {
-          type: 'stop-recording'
-        });
+        // Notify content script with retry
+        try {
+          await this.ensureContentScriptAndNotify('stop-recording');
+        } catch (contentError) {
+          console.warn('Could not notify content script:', contentError);
+        }
 
         // Update UI
         this.updateRecordingState('stopped');
@@ -362,10 +361,8 @@ class FioriTestPopup {
 
   async detectApplication() {
     try {
-      // Try to get UI5 context from content script
-      const response = await chrome.tabs.sendMessage(this.currentTab.id, {
-        type: 'get-ui5-context'
-      });
+      // Try to get UI5 context from content script with retry
+      const response = await this.ensureContentScriptAndNotify('get-ui5-context');
 
       const appStatusIcon = document.getElementById('appStatusIcon');
       const appStatusText = document.getElementById('appStatusText');
@@ -395,6 +392,40 @@ class FioriTestPopup {
       
       document.getElementById('appStatusIcon').textContent = '❓';
       document.getElementById('appStatusText').textContent = 'Detection failed';
+    }
+  }
+
+  async ensureContentScriptAndNotify(messageType, data = null) {
+    const maxRetries = 3;
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // First try to send the message
+        const response = await chrome.tabs.sendMessage(this.currentTab.id, {
+          type: messageType,
+          data
+        });
+        return response;
+      } catch (error) {
+        console.log(`Attempt ${attempt} failed:`, error.message);
+        
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        
+        // If it failed, try to inject the content script
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: this.currentTab.id },
+            files: ['content.js']
+          });
+          
+          // Wait for script to initialize
+          await new Promise(resolve => setTimeout(resolve, 200));
+        } catch (injectionError) {
+          console.warn('Failed to inject content script:', injectionError);
+        }
+      }
     }
   }
 

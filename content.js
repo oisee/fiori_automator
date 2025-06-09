@@ -102,6 +102,11 @@ class FioriTestCapture {
 
   handleMessage(message, sender, sendResponse) {
     switch (message.type) {
+      case 'ping':
+        // Respond to ping to confirm content script is loaded
+        sendResponse({ success: true, status: 'ready' });
+        break;
+
       case 'start-recording':
         this.startRecording();
         sendResponse({ success: true });

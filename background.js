@@ -448,10 +448,54 @@ class FioriTestBackground {
     return sessionData;
   }
 
-  notifyContentScript(tabId, type, data) {
-    chrome.tabs.sendMessage(tabId, { type, data }).catch(() => {
-      // Ignore errors if content script is not ready
-    });
+  async notifyContentScript(tabId, type, data) {
+    try {
+      // First, ensure content script is injected
+      await this.ensureContentScriptInjected(tabId);
+      
+      // Then send the message with retry logic
+      await this.sendMessageWithRetry(tabId, { type, data });
+    } catch (error) {
+      this.log('Could not notify content script:', error.message);
+    }
+  }
+
+  async ensureContentScriptInjected(tabId) {
+    try {
+      // Check if content script is already injected by sending a ping
+      await chrome.tabs.sendMessage(tabId, { type: 'ping' });
+    } catch (error) {
+      // Content script not injected, inject it now
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          files: ['content.js']
+        });
+        
+        // Wait a bit for the script to initialize
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        this.log('Content script injected for tab:', tabId);
+      } catch (injectionError) {
+        throw new Error(`Failed to inject content script: ${injectionError.message}`);
+      }
+    }
+  }
+
+  async sendMessageWithRetry(tabId, message, maxRetries = 3) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        await chrome.tabs.sendMessage(tabId, message);
+        return; // Success
+      } catch (error) {
+        if (attempt === maxRetries) {
+          throw error;
+        }
+        
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, attempt * 200));
+      }
+    }
   }
 
   updatePopupState(tabId, state) {
