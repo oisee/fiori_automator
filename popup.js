@@ -4,10 +4,8 @@
 class FioriTestPopup {
   constructor() {
     this.currentTab = null;
-    this.isRecording = false;
-    this.sessionData = null;
     this.recordingTimer = null;
-    this.startTime = null;
+    this.currentState = null;
     
     this.init();
   }
@@ -15,54 +13,47 @@ class FioriTestPopup {
   async init() {
     await this.getCurrentTab();
     this.setupEventListeners();
-    await this.checkRecordingState();
+    await this.loadCurrentState();
     this.detectApplication();
     this.loadRecentSessions();
-    this.updateUI();
+    this.updateUIFromState();
   }
 
-  async checkRecordingState() {
+  async loadCurrentState() {
     try {
-      console.log('Checking recording state for tab:', this.currentTab.id);
+      console.log('Loading current recording state for tab:', this.currentTab.id);
       
-      // Check if we have an active recording session for this tab
+      // Get comprehensive recording state from background
       const response = await chrome.runtime.sendMessage({
-        type: 'get-session-data',
+        type: 'get-recording-state',
         tabId: this.currentTab.id
       });
 
       console.log('Recording state response:', response);
 
-      if (response && response.success && response.data && response.data.isRecording) {
-        // Resume the recording state in popup
-        this.isRecording = true;
-        this.sessionData = response.data;
-        this.startTime = this.sessionData.startTime;
+      if (response && response.success) {
+        this.currentState = response.data;
         
-        console.log('Resuming recording state:', {
-          sessionId: this.sessionData.sessionId,
-          startTime: this.startTime,
-          events: this.sessionData.events?.length || 0
+        console.log('Current state loaded:', {
+          state: this.currentState.state,
+          sessionId: this.currentState.sessionId,
+          duration: this.currentState.duration,
+          eventCount: this.currentState.eventCount
         });
         
-        // Update UI to show recording state
-        this.updateRecordingState('recording');
-        this.updateSessionInfo(this.sessionData.metadata?.sessionName || 'Recording Session');
-        
-        // Restart timer
-        this.startRecordingTimer();
-        
-        // Update session stats if we have events
-        if (this.sessionData.events && this.sessionData.events.length > 0) {
-          this.updateSessionStats(this.sessionData);
+        // Start/resume timer if recording
+        if (this.currentState.isRecording) {
+          this.startRecordingTimer();
         }
         
-        console.log('✅ Resumed recording state from background');
+        console.log('✅ State loaded from background');
       } else {
-        console.log('No active recording found for this tab');
+        console.error('Failed to load state:', response?.error);
+        this.currentState = { state: 'idle', isRecording: false, isPaused: false };
       }
     } catch (error) {
-      console.error('❌ Failed to check recording state:', error);
+      console.error('❌ Failed to load recording state:', error);
+      this.currentState = { state: 'idle', isRecording: false, isPaused: false };
     }
   }
 
@@ -92,43 +83,43 @@ class FioriTestPopup {
 
   handleMessage(message, sender, sendResponse) {
     switch (message.type) {
-      case 'update-recording-state':
+      case 'recording-state-changed':
         if (message.tabId === this.currentTab?.id) {
-          this.updateRecordingState(message.state);
+          console.log('Recording state changed:', message.state);
+          this.refreshState();
         }
         break;
 
       case 'session-updated':
         if (message.tabId === this.currentTab?.id) {
-          console.log('Session updated:', message.data);
-          this.sessionData = message.data;
-          this.updateSessionStats(message.data);
-        }
-        break;
-
-      case 'event-captured':
-        if (message.tabId === this.currentTab?.id && this.isRecording) {
-          console.log('Event captured, updating stats');
-          // Refresh session data to get latest stats
-          this.refreshSessionData();
+          console.log('Session updated');
+          this.refreshState();
         }
         break;
     }
   }
 
-  async refreshSessionData() {
+  async refreshState() {
     try {
       const response = await chrome.runtime.sendMessage({
-        type: 'get-session-data',
+        type: 'get-recording-state',
         tabId: this.currentTab.id
       });
 
-      if (response && response.success && response.data) {
-        this.sessionData = response.data;
-        this.updateSessionStats(response.data);
+      if (response && response.success) {
+        this.currentState = response.data;
+        this.updateUIFromState();
+        
+        // Update timer based on new state
+        if (this.currentState.isRecording && !this.recordingTimer) {
+          this.startRecordingTimer();
+        } else if (!this.currentState.isRecording && this.recordingTimer) {
+          clearInterval(this.recordingTimer);
+          this.recordingTimer = null;
+        }
       }
     } catch (error) {
-      console.error('Failed to refresh session data:', error);
+      console.error('Failed to refresh state:', error);
     }
   }
 
@@ -161,16 +152,8 @@ class FioriTestPopup {
       console.log('Background response:', response);
 
       if (response && response.success) {
-        this.isRecording = true;
-        this.startTime = Date.now();
-        this.sessionData = { ...config, events: [], networkRequests: [] };
-        
-        // Start UI timer
-        this.startRecordingTimer();
-        
-        // Update UI
-        this.updateRecordingState('recording');
-        this.updateSessionInfo(sessionName);
+        // Refresh state from background (single source of truth)
+        await this.refreshState();
         
         // Notify content script with retry
         try {
@@ -195,17 +178,30 @@ class FioriTestPopup {
 
   async pauseRecording() {
     try {
-      // Toggle pause state
-      if (this.recordingTimer) {
-        clearInterval(this.recordingTimer);
-        this.recordingTimer = null;
-        this.updateRecordingState('paused');
+      if (!this.currentState || !this.currentState.isRecording) return;
+      
+      const action = this.currentState.isPaused ? 'resume-recording' : 'pause-recording';
+      
+      console.log(`${action}...`);
+      this.showLoading(this.currentState.isPaused ? 'Resuming...' : 'Pausing...');
+
+      const response = await chrome.runtime.sendMessage({
+        type: action,
+        tabId: this.currentTab.id
+      });
+
+      if (response && response.success) {
+        // Refresh state from background
+        await this.refreshState();
+        this.showSuccess(this.currentState.isPaused ? 'Recording paused' : 'Recording resumed');
       } else {
-        this.startRecordingTimer();
-        this.updateRecordingState('recording');
+        throw new Error(response?.error || 'Unknown error');
       }
     } catch (error) {
-      console.error('Failed to pause recording:', error);
+      console.error('Failed to toggle pause:', error);
+      this.showError('Failed to toggle pause');
+    } finally {
+      this.hideLoading();
     }
   }
 
@@ -213,19 +209,15 @@ class FioriTestPopup {
     try {
       this.showLoading('Stopping recording...');
 
-      // Stop timer
-      if (this.recordingTimer) {
-        clearInterval(this.recordingTimer);
-        this.recordingTimer = null;
-      }
-
       // Send stop message to background script
       const response = await chrome.runtime.sendMessage({
-        type: 'stop-recording'
+        type: 'stop-recording',
+        tabId: this.currentTab.id
       });
 
-      if (response.success) {
-        this.isRecording = false;
+      if (response && response.success) {
+        // Refresh state from background
+        await this.refreshState();
         
         // Notify content script with retry
         try {
@@ -234,14 +226,13 @@ class FioriTestPopup {
           console.warn('Could not notify content script:', contentError);
         }
 
-        // Update UI
-        this.updateRecordingState('stopped');
-        
         // Show completion message
         this.showSuccess('Recording completed successfully!');
         
         // Refresh sessions list
         setTimeout(() => this.loadRecentSessions(), 1000);
+      } else {
+        throw new Error(response?.error || 'Unknown error');
       }
     } catch (error) {
       console.error('Failed to stop recording:', error);
@@ -252,17 +243,33 @@ class FioriTestPopup {
   }
 
   startRecordingTimer() {
+    if (this.recordingTimer) {
+      clearInterval(this.recordingTimer);
+    }
+    
     this.recordingTimer = setInterval(() => {
-      const elapsed = Date.now() - this.startTime;
-      const minutes = Math.floor(elapsed / 60000);
-      const seconds = Math.floor((elapsed % 60000) / 1000);
-      
-      document.getElementById('duration').textContent = 
-        `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      if (this.currentState && this.currentState.isRecording) {
+        const duration = this.currentState.duration || 0;
+        const minutes = Math.floor(duration / 60000);
+        const seconds = Math.floor((duration % 60000) / 1000);
+        
+        const durationElement = document.getElementById('duration');
+        if (durationElement) {
+          durationElement.textContent = 
+            `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+        
+        // Refresh state periodically to get updated duration
+        if (Date.now() % 5000 < 1000) { // Refresh every 5 seconds
+          this.refreshState();
+        }
+      }
     }, 1000);
   }
 
-  updateRecordingState(state) {
+  updateUIFromState() {
+    if (!this.currentState) return;
+    
     const statusDot = document.getElementById('statusDot');
     const statusText = document.getElementById('statusText');
     const recordBtn = document.getElementById('recordBtn');
@@ -274,7 +281,7 @@ class FioriTestPopup {
     // Reset classes
     statusDot.className = 'status-dot';
     
-    switch (state) {
+    switch (this.currentState.state) {
       case 'recording':
         statusDot.classList.add('recording');
         statusText.textContent = 'Recording';
@@ -283,29 +290,37 @@ class FioriTestPopup {
         stopBtn.style.display = 'flex';
         sessionInfo.style.display = 'block';
         sessionConfig.style.display = 'none';
+        pauseBtn.innerHTML = '<span class="btn-icon">⏸️</span>Pause';
         break;
 
       case 'paused':
         statusDot.classList.add('paused');
         statusText.textContent = 'Paused';
+        recordBtn.style.display = 'none';
+        pauseBtn.style.display = 'flex';
+        stopBtn.style.display = 'flex';
+        sessionInfo.style.display = 'block';
+        sessionConfig.style.display = 'none';
         pauseBtn.innerHTML = '<span class="btn-icon">▶️</span>Resume';
         break;
 
       case 'stopped':
+      case 'idle':
+      default:
         statusText.textContent = 'Ready';
         recordBtn.style.display = 'flex';
         pauseBtn.style.display = 'none';
         stopBtn.style.display = 'none';
         sessionInfo.style.display = 'none';
         sessionConfig.style.display = 'block';
-        
-        // Reset pause button text
         pauseBtn.innerHTML = '<span class="btn-icon">⏸️</span>Pause';
         break;
-
-      default:
-        statusText.textContent = 'Ready';
-        break;
+    }
+    
+    // Update session info if recording
+    if (this.currentState.isRecording) {
+      this.updateSessionInfo(this.currentState.sessionName);
+      this.updateSessionStats(this.currentState);
     }
   }
 
@@ -313,26 +328,31 @@ class FioriTestPopup {
     document.getElementById('sessionName').textContent = sessionName;
   }
 
-  updateSessionStats(stats) {
-    document.getElementById('actionCount').textContent = stats.events?.length || 0;
-    document.getElementById('odataCount').textContent = stats.networkRequests?.length || 0;
+  updateSessionStats(state) {
+    const actionCountEl = document.getElementById('actionCount');
+    const odataCountEl = document.getElementById('odataCount');
     
-    if (stats.lastEvent) {
+    if (actionCountEl) actionCountEl.textContent = state.eventCount || 0;
+    if (odataCountEl) odataCountEl.textContent = state.networkRequestCount || 0;
+    
+    if (state.lastEvent) {
       const lastAction = document.getElementById('lastAction');
-      const actionText = lastAction.querySelector('.action-text');
+      const actionText = lastAction?.querySelector('.action-text');
       const confidence = document.getElementById('confidence');
       
-      actionText.textContent = this.formatEventDescription(stats.lastEvent);
+      if (actionText) {
+        actionText.textContent = this.formatEventDescription(state.lastEvent);
+      }
       
-      if (stats.lastEvent.correlatedRequests?.length > 0) {
-        const avgConfidence = stats.lastEvent.correlatedRequests.reduce(
+      if (confidence && state.lastEvent.correlatedRequests?.length > 0) {
+        const avgConfidence = state.lastEvent.correlatedRequests.reduce(
           (sum, req) => sum + req.correlation.confidence, 0
-        ) / stats.lastEvent.correlatedRequests.length;
+        ) / state.lastEvent.correlatedRequests.length;
         
         confidence.textContent = `${Math.round(avgConfidence)}%`;
         confidence.className = 'confidence ' + this.getConfidenceClass(avgConfidence);
         confidence.style.display = 'inline';
-      } else {
+      } else if (confidence) {
         confidence.style.display = 'none';
       }
     }
@@ -523,7 +543,7 @@ class FioriTestPopup {
 
   async exportSession() {
     try {
-      if (!this.sessionData) {
+      if (!this.currentState || !this.currentState.sessionId) {
         this.showError('No session data to export');
         return;
       }
@@ -533,18 +553,20 @@ class FioriTestPopup {
         tabId: this.currentTab.id
       });
 
-      if (response.success && response.data) {
+      if (response && response.success && response.data) {
         const sessionJson = JSON.stringify(response.data, null, 2);
         const blob = new Blob([sessionJson], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         
         const a = document.createElement('a');
         a.href = url;
-        a.download = `fiori-session-${Date.now()}.json`;
+        a.download = `fiori-session-${this.currentState.sessionId}.json`;
         a.click();
         
         URL.revokeObjectURL(url);
         this.showSuccess('Session exported successfully');
+      } else {
+        this.showError('No session data available');
       }
     } catch (error) {
       console.error('Export failed:', error);
@@ -602,10 +624,6 @@ class FioriTestPopup {
     }, 3000);
   }
 
-  updateUI() {
-    // Initial UI state
-    this.updateRecordingState('stopped');
-  }
 }
 
 // Initialize popup when DOM is ready

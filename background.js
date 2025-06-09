@@ -188,6 +188,21 @@ class FioriTestBackground {
           sendResponse({ success: true, data: sessionData });
           break;
 
+        case 'get-recording-state':
+          const recordingState = await this.getRecordingState(sender.tab?.id || message.tabId);
+          sendResponse({ success: true, data: recordingState });
+          break;
+
+        case 'pause-recording':
+          await this.pauseRecording(sender.tab?.id || message.tabId);
+          sendResponse({ success: true });
+          break;
+
+        case 'resume-recording':
+          await this.resumeRecording(sender.tab?.id || message.tabId);
+          sendResponse({ success: true });
+          break;
+
         case 'save-session':
           await this.saveSession(message.data);
           sendResponse({ success: true });
@@ -224,33 +239,112 @@ class FioriTestBackground {
       },
       events: [],
       networkRequests: [],
-      isRecording: true
+      isRecording: true,
+      isPaused: false,
+      pausedTime: 0,
+      lastPauseStart: null
     };
 
     this.sessions.set(tabId, session);
     
-    // Update popup with recording state
-    this.updatePopupState(tabId, 'recording');
+    // Broadcast state change
+    this.broadcastStateChange(tabId, 'recording');
   }
 
   async stopRecording(tabId) {
     const session = this.sessions.get(tabId);
     if (session) {
+      // If paused, add final pause duration
+      if (session.isPaused && session.lastPauseStart) {
+        session.pausedTime += Date.now() - session.lastPauseStart;
+      }
+
       session.isRecording = false;
+      session.isPaused = false;
       session.endTime = Date.now();
-      session.duration = session.endTime - session.startTime;
+      session.duration = session.endTime - session.startTime - session.pausedTime;
 
       // Save session to storage
       await this.saveSession(session);
       
-      // Update popup state
-      this.updatePopupState(tabId, 'stopped');
+      // Broadcast state change
+      this.broadcastStateChange(tabId, 'stopped');
+      
+      // Clean up session from memory after saving
+      this.sessions.delete(tabId);
     }
+  }
+
+  async pauseRecording(tabId) {
+    const session = this.sessions.get(tabId);
+    if (session && session.isRecording && !session.isPaused) {
+      session.isPaused = true;
+      session.lastPauseStart = Date.now();
+      
+      this.broadcastStateChange(tabId, 'paused');
+      this.log('Recording paused for tab:', tabId);
+    }
+  }
+
+  async resumeRecording(tabId) {
+    const session = this.sessions.get(tabId);
+    if (session && session.isRecording && session.isPaused) {
+      // Add paused time to total
+      session.pausedTime += Date.now() - session.lastPauseStart;
+      session.isPaused = false;
+      session.lastPauseStart = null;
+      
+      this.broadcastStateChange(tabId, 'recording');
+      this.log('Recording resumed for tab:', tabId);
+    }
+  }
+
+  async getRecordingState(tabId) {
+    const session = this.sessions.get(tabId);
+    
+    if (!session) {
+      return {
+        isRecording: false,
+        isPaused: false,
+        sessionId: null,
+        sessionName: null,
+        startTime: null,
+        duration: 0,
+        eventCount: 0,
+        networkRequestCount: 0,
+        state: 'idle'
+      };
+    }
+
+    // Calculate current duration
+    let currentDuration = 0;
+    if (session.isRecording) {
+      const now = Date.now();
+      const totalElapsed = now - session.startTime;
+      const pausedTime = session.pausedTime + (session.isPaused && session.lastPauseStart ? now - session.lastPauseStart : 0);
+      currentDuration = totalElapsed - pausedTime;
+    } else {
+      currentDuration = session.duration || 0;
+    }
+
+    return {
+      isRecording: session.isRecording,
+      isPaused: session.isPaused,
+      sessionId: session.sessionId,
+      sessionName: session.metadata?.sessionName || 'Unnamed Session',
+      startTime: session.startTime,
+      endTime: session.endTime,
+      duration: currentDuration,
+      eventCount: session.events?.length || 0,
+      networkRequestCount: session.networkRequests?.length || 0,
+      lastEvent: session.events?.[session.events.length - 1] || null,
+      state: session.isRecording ? (session.isPaused ? 'paused' : 'recording') : 'stopped'
+    };
   }
 
   async captureEvent(tabId, eventData) {
     const session = this.sessions.get(tabId);
-    if (session && session.isRecording) {
+    if (session && session.isRecording && !session.isPaused) {
       const event = {
         eventId: this.generateUUID(),
         timestamp: Date.now(),
@@ -269,19 +363,29 @@ class FioriTestBackground {
       
       this.log(`Event captured: ${event.type}, Total events: ${session.events.length}`);
       
-      // Notify popup about the new event
-      this.notifyPopupUpdate(tabId, session);
+      // Broadcast updated session state
+      this.broadcastSessionUpdate(tabId);
     }
   }
 
-  notifyPopupUpdate(tabId, session) {
-    // Send message to update popup if it's open
+  broadcastStateChange(tabId, state) {
+    // Broadcast recording state change to all listeners
+    chrome.runtime.sendMessage({
+      type: 'recording-state-changed',
+      tabId,
+      state
+    }).catch(() => {
+      // No listeners, that's fine
+    });
+  }
+
+  broadcastSessionUpdate(tabId) {
+    // Broadcast session update to all listeners
     chrome.runtime.sendMessage({
       type: 'session-updated',
-      tabId,
-      data: { ...session }
+      tabId
     }).catch(() => {
-      // Popup might not be open, that's fine
+      // No listeners, that's fine
     });
   }
 
@@ -311,6 +415,8 @@ class FioriTestBackground {
         endTime: session.endTime,
         duration: session.duration,
         isRecording: session.isRecording,
+        isPaused: session.isPaused,
+        pausedTime: session.pausedTime,
         metadata: { ...session.metadata },
         events: session.events?.map(event => this.cleanEventData(event)) || [],
         networkRequests: session.networkRequests?.map(req => this.cleanNetworkData(req)) || []
@@ -325,6 +431,8 @@ class FioriTestBackground {
         tabId: session.tabId,
         startTime: session.startTime,
         isRecording: session.isRecording,
+        isPaused: false,
+        pausedTime: 0,
         metadata: session.metadata || {},
         events: [],
         networkRequests: []
@@ -498,16 +606,6 @@ class FioriTestBackground {
     }
   }
 
-  updatePopupState(tabId, state) {
-    // Send message to popup if it's open
-    chrome.runtime.sendMessage({
-      type: 'update-recording-state',
-      tabId,
-      state
-    }).catch(() => {
-      // Popup might not be open
-    });
-  }
 
   generateUUID() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
