@@ -5,6 +5,7 @@
 if (!window.FioriTestCapture) {
   window.FioriTestCapture = class {
     constructor() {
+      console.log('[Fiori] FioriTestCapture constructor called');
       this.isRecording = false;
       this.eventQueue = [];
       this.lastScreenshot = null;
@@ -155,10 +156,11 @@ if (!window.FioriTestCapture) {
   }
 
   startRecording() {
+    console.log('[Fiori] Start recording called');
     this.isRecording = true;
     this.eventQueue = [];
     this.addRecordingIndicator();
-    console.log('Fiori Test Capture: Recording started');
+    console.log('Fiori Test Capture: Recording started, isRecording =', this.isRecording);
   }
 
   stopRecording() {
@@ -1326,18 +1328,23 @@ if (!window.FioriTestCapture) {
       console.error('Failed to send event to background:', error);
     }
   }
-}
 
   }; // End of FioriTestCapture class
 }
 
 // Initialize content script only if not already initialized
 if (!window.fioriTestCaptureInstance) {
+  console.log('[Fiori] Initializing content script...');
+  
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
+      console.log('[Fiori] DOM loaded, creating instance');
       window.fioriTestCaptureInstance = new window.FioriTestCapture();
     });
   } else {
+    console.log('[Fiori] DOM ready, creating instance immediately');
     window.fioriTestCaptureInstance = new window.FioriTestCapture();
   }
+} else {
+  console.log('[Fiori] Content script already initialized');
 }

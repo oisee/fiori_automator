@@ -370,13 +370,13 @@ class FioriTestBackground {
           });
           break;
 
-        case 'export-session-zip':
-          const zipResult = await this.exportSessionAsZip(message.sessionId || sender.tab?.id || message.tabId);
+        case 'export-session-screenshots':
+          const screenshotResult = await this.exportSessionScreenshots(message.sessionId || sender.tab?.id || message.tabId);
           sendResponse({ 
             success: true, 
-            zipData: zipResult.content, 
-            filename: zipResult.filename,
-            contentType: 'application/zip'
+            screenshots: screenshotResult.screenshots,
+            sessionData: screenshotResult.sessionData,
+            filename: screenshotResult.filename
           });
           break;
 
@@ -1188,7 +1188,7 @@ class FioriTestBackground {
     }
   }
 
-  async exportSessionAsZip(sessionIdentifier) {
+  async exportSessionScreenshots(sessionIdentifier) {
     try {
       // Get session data
       let sessionData;
@@ -1210,44 +1210,33 @@ class FioriTestBackground {
       
       // Collect all screenshots referenced in the session
       const screenshotIds = this.collectScreenshotIds(sessionData);
-      const screenshots = new Map();
+      const screenshots = [];
       
       for (const screenshotId of screenshotIds) {
         const screenshot = this.screenshots.get(screenshotId);
         if (screenshot) {
-          screenshots.set(screenshotId, screenshot);
-        }
-      }
-
-      // Create a simple archive structure
-      const archive = {
-        'session.json': jsonData,
-        screenshots: {}
-      };
-
-      // Add screenshots to archive
-      for (const [id, screenshot] of screenshots) {
-        const filename = `${id}.png`;
-        archive.screenshots[filename] = {
-          data: screenshot.dataUrl,
-          metadata: {
+          screenshots.push({
+            id: screenshotId,
+            filename: `${screenshotId}.png`,
+            dataUrl: screenshot.dataUrl,
             timestamp: screenshot.timestamp,
             eventType: screenshot.eventType,
             elementInfo: screenshot.elementInfo
-          }
-        };
+          });
+        }
       }
 
       // Generate semantic filename
-      const filename = this.generateSemanticFilename(sessionData, 'zip');
+      const filename = this.generateSemanticFilename(sessionData, 'json');
       
       return {
-        content: JSON.stringify(archive, null, 2),
+        screenshots: screenshots,
+        sessionData: jsonData,
         filename: filename,
-        screenshotCount: screenshots.size
+        screenshotCount: screenshots.length
       };
     } catch (error) {
-      this.logError('Failed to export session as ZIP:', error);
+      this.logError('Failed to export session screenshots:', error);
       throw error;
     }
   }

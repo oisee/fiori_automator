@@ -342,35 +342,60 @@ class SessionsManager {
 
   async exportSessionAsZip(session) {
     try {
-      this.showNotification('Creating ZIP export with screenshots...', 'info');
+      this.showNotification('Exporting session with screenshots...', 'info');
       
       const response = await chrome.runtime.sendMessage({
-        type: 'export-session-zip',
+        type: 'export-session-screenshots',
         sessionId: session.sessionId
       });
 
       if (response && response.success) {
-        // Create ZIP-like structure download
-        const zipContent = response.zipData;
-        const blob = new Blob([zipContent], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
+        // Download session JSON first
+        const sessionBlob = new Blob([response.sessionData], { type: 'application/json' });
+        const sessionUrl = URL.createObjectURL(sessionBlob);
         
-        const a = document.createElement('a');
-        a.href = url;
-        // Use semantic filename from response or fallback
-        a.download = response.filename || `fiori-session-${session.sessionId}-with-screenshots.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        const sessionLink = document.createElement('a');
+        sessionLink.href = sessionUrl;
+        sessionLink.download = response.filename || `fiori-session-${session.sessionId}.json`;
+        document.body.appendChild(sessionLink);
+        sessionLink.click();
+        document.body.removeChild(sessionLink);
+        URL.revokeObjectURL(sessionUrl);
+
+        // Download each screenshot individually
+        if (response.screenshots && response.screenshots.length > 0) {
+          for (const screenshot of response.screenshots) {
+            // Convert data URL to blob
+            const base64Data = screenshot.dataUrl.split(',')[1];
+            const byteCharacters = atob(base64Data);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'image/png' });
+            
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = screenshot.filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            
+            // Small delay to prevent browser blocking multiple downloads
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        }
         
-        URL.revokeObjectURL(url);
-        this.showNotification(`ZIP export completed! ${response.screenshotCount || 0} screenshots included.`);
+        this.showNotification(`Export completed! ${response.screenshotCount || 0} screenshots downloaded.`);
       } else {
         throw new Error(response?.error || 'Export failed');
       }
     } catch (error) {
-      console.error('ZIP export failed:', error);
-      this.showNotification('ZIP export failed', 'error');
+      console.error('Screenshot export failed:', error);
+      this.showNotification('Screenshot export failed', 'error');
     }
   }
 
