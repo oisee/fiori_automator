@@ -1,26 +1,45 @@
-# Building and Installing Fiori Test Automation Extension in Microsoft Edge
+# Build and Deployment Guide
+
+This guide explains how to build and deploy the Fiori Test Automation extension for development and testing.
 
 ## 🚀 Quick Start
 
-### 1. Direct Installation (Development Mode)
-
-**No build required!** The extension is ready to use as-is:
-
-1. Open Microsoft Edge
-2. Navigate to `edge://extensions/`
-3. Enable **"Developer mode"** (toggle in bottom-left or top-right)
-4. Click **"Load unpacked"**
-5. Select the `fiori_automator` folder
-6. The extension icon should appear in your toolbar!
-
-### 2. Installing from ZIP (Distribution)
-
 ```bash
-# Create a distribution package
-zip -r fiori-test-automation.zip . -x ".*" -x "*.md" -x "node_modules/*" -x "*.zip"
+# Build and copy to Windows (most common workflow)
+make build
+
+# Or use the build script directly
+./build.sh
 ```
 
-Then drag the ZIP file to `edge://extensions/`
+## Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `make build` | Build extension and copy to Windows (`C:\bin\fiori_automator\`) |
+| `make deploy` | Same as build |
+| `make clean` | Remove all build artifacts and Windows files |
+| `make install` | Set permissions and build |
+| `make validate` | Check manifest.json validity |
+| `make test` | Show manual testing instructions |
+| `make help` | Show help message |
+
+## Windows Installation
+
+1. **Build the extension:**
+   ```bash
+   make build
+   ```
+
+2. **Load in browser:**
+   - Open Chrome/Edge
+   - Go to `chrome://extensions/` or `edge://extensions/`
+   - Enable "Developer mode" (toggle in top right)
+   - Click "Load unpacked"
+   - Navigate to `C:\bin\fiori_automator\`
+   - Select the folder
+
+3. **Ready to use!** The extension will appear in your browser toolbar.
 
 ## 🛠️ Build Process (Optional)
 

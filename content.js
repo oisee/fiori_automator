@@ -369,22 +369,207 @@ class FioriTestCapture {
   }
 
   detectUI5Context() {
-    // Check if SAPUI5 is loaded
-    if (window.sap && window.sap.ui) {
-      this.ui5Context = {
-        version: window.sap.ui.version,
-        theme: window.sap.ui.getCore()?.getConfiguration()?.getTheme(),
-        locale: window.sap.ui.getCore()?.getConfiguration()?.getLocale()?.toString(),
-        libraries: Object.keys(window.sap.ui.getCore()?.getLoadedLibraries() || {}),
-        isUI5App: true,
-        coreLoaded: !!window.sap.ui.getCore(),
-        hasUIAreas: (window.sap.ui.getCore()?.getUIAreas() || []).length > 0
-      };
+    // Inject detection script into page context for deep UI5 access
+    this.injectUI5DetectionScript();
+    
+    // Fallback: Direct detection (limited in content script context)
+    this.performDirectUI5Detection();
+    
+    // DOM-based heuristic detection
+    this.performHeuristicDetection();
+    
+    // Listen for injected script results
+    this.setupUI5DetectionListener();
+  }
+
+  injectUI5DetectionScript() {
+    try {
+      const script = document.createElement('script');
+      script.textContent = `
+        (function() {
+          try {
+            const detection = {
+              isSAPUI5: false,
+              isFiori: false,
+              hasCore: false,
+              loadedLibraries: [],
+              theme: null,
+              locale: null,
+              version: null,
+              viewIdPrefixDetected: false,
+              fioriClassDetected: false,
+              uiAreas: [],
+              components: [],
+              detectionMethod: 'injected-script'
+            };
+
+            // Check for SAPUI5/OpenUI5
+            if (window.sap?.ui?.getCore) {
+              const core = window.sap.ui.getCore();
+              detection.isSAPUI5 = true;
+              detection.hasCore = true;
+              detection.version = window.sap.ui.version;
+
+              try {
+                detection.loadedLibraries = Object.keys(core.getLoadedLibraries?.() || {});
+                detection.theme = core.getConfiguration?.().getTheme?.();
+                detection.locale = core.getConfiguration?.().getLocale?.().toString();
+                detection.uiAreas = core.getUIAreas?.().map(area => ({
+                  id: area.getId?.(),
+                  content: area.getContent?.().length || 0
+                })) || [];
+
+                // Get component information
+                const componentRegistry = window.sap.ui.getCore().getComponentRegistry?.();
+                if (componentRegistry) {
+                  detection.components = Object.keys(componentRegistry).map(id => ({
+                    id: id,
+                    manifest: componentRegistry[id].getManifest?.()?.['sap.app']?.id
+                  }));
+                }
+              } catch (e) {
+                console.warn('Error getting UI5 core details:', e);
+              }
+
+              // Heuristic: Fiori app detection by ID patterns
+              detection.viewIdPrefixDetected = !!document.querySelector('[id^="application-"][id*="--"]');
+              
+              // Heuristic: Fiori shell/page detection
+              detection.fioriClassDetected = !!(
+                document.querySelector('.sapMPage, .sapUshellShell, .sapUshellTileContainer') ||
+                document.querySelector('[class*="sapMObject"]') ||
+                document.querySelector('[class*="sapUshell"]')
+              );
+
+              detection.isFiori = detection.viewIdPrefixDetected || detection.fioriClassDetected;
+            }
+
+            // Dispatch result to content script
+            window.dispatchEvent(new CustomEvent('SAPUI5DetectionResult', { 
+              detail: detection 
+            }));
+            
+          } catch (err) {
+            console.warn('SAPUI5 detection error:', err);
+            window.dispatchEvent(new CustomEvent('SAPUI5DetectionResult', { 
+              detail: { 
+                isSAPUI5: false, 
+                error: err.message,
+                detectionMethod: 'injected-script-error'
+              } 
+            }));
+          }
+        })();
+      `;
       
-      console.log('Fiori Test Capture: SAPUI5 detected', this.ui5Context);
-    } else {
-      this.ui5Context = { isUI5App: false };
+      (document.head || document.documentElement).appendChild(script);
+      script.remove();
+      
+      this.log('UI5 detection script injected');
+    } catch (error) {
+      this.log('Failed to inject UI5 detection script:', error);
     }
+  }
+
+  performDirectUI5Detection() {
+    // Limited detection in content script context
+    try {
+      if (window.sap && window.sap.ui) {
+        this.ui5Context = {
+          version: window.sap.ui.version,
+          theme: window.sap.ui.getCore()?.getConfiguration()?.getTheme(),
+          locale: window.sap.ui.getCore()?.getConfiguration()?.getLocale()?.toString(),
+          libraries: Object.keys(window.sap.ui.getCore()?.getLoadedLibraries() || {}),
+          isUI5App: true,
+          isFiori: this.detectFioriPatterns(),
+          detectionMethod: 'direct-content-script'
+        };
+        
+        this.log('Direct UI5 detection successful', this.ui5Context);
+      }
+    } catch (error) {
+      this.log('Direct UI5 detection failed:', error);
+    }
+  }
+
+  performHeuristicDetection() {
+    // DOM-based detection as fallback
+    const heuristics = {
+      // Fiori app ID patterns
+      hasApplicationIds: !!document.querySelector('[id^="application-"][id*="component"]'),
+      hasViewIds: !!document.querySelector('[id*="--"][id*="component---"]'),
+      
+      // SAP CSS classes
+      hasSapClasses: !!document.querySelector('[class*="sap"]'),
+      hasFioriShell: !!document.querySelector('.sapUshellShell'),
+      hasFioriPage: !!document.querySelector('.sapMPage'),
+      hasFioriTiles: !!document.querySelector('.sapUshellTile'),
+      
+      // UI5 control patterns
+      hasUI5Controls: !!document.querySelector('[class*="sapM"], [class*="sapUi"]'),
+      
+      // Script tags indicating UI5
+      hasUI5Scripts: !!document.querySelector('script[src*="sap-ui-core"], script[src*="resources/sap-ui"]'),
+      
+      // Bootstrap indicator
+      hasUI5Bootstrap: !!document.querySelector('#sap-ui-bootstrap')
+    };
+
+    const confidence = Object.values(heuristics).filter(Boolean).length / Object.keys(heuristics).length;
+    
+    if (!this.ui5Context || !this.ui5Context.isUI5App) {
+      this.ui5Context = {
+        isUI5App: confidence > 0.3, // 30% threshold
+        isFiori: heuristics.hasApplicationIds || heuristics.hasFioriShell,
+        confidence: confidence,
+        heuristics: heuristics,
+        detectionMethod: 'heuristic-dom'
+      };
+    }
+
+    this.log('Heuristic UI5 detection completed', { confidence, heuristics });
+  }
+
+  setupUI5DetectionListener() {
+    window.addEventListener('SAPUI5DetectionResult', (event) => {
+      const detection = event.detail;
+      this.log('Received UI5 detection result from injected script:', detection);
+      
+      // Merge with existing context or replace if better
+      if (detection.isSAPUI5 || (!this.ui5Context?.isUI5App && detection.confidence > 0.5)) {
+        this.ui5Context = {
+          ...this.ui5Context,
+          ...detection,
+          detectionMethod: 'injected-script-enhanced'
+        };
+        
+        this.log('Updated UI5 context from injected script:', this.ui5Context);
+      }
+    });
+  }
+
+  detectFioriPatterns() {
+    // Enhanced Fiori pattern detection
+    const fioriIndicators = [
+      // ID patterns
+      !!document.querySelector('[id^="application-"][id*="component"]'),
+      !!document.querySelector('[id*="Shell-home"]'),
+      !!document.querySelector('[id*="manageDetectionMethod"]'),
+      
+      // Class patterns
+      !!document.querySelector('.sapUshellShell'),
+      !!document.querySelector('.sapUshellTileContainer'),
+      !!document.querySelector('.sapMPage'),
+      
+      // URL patterns
+      window.location.hash.includes('#') && (
+        window.location.hash.includes('Shell-home') ||
+        window.location.hash.includes('-manage') ||
+        window.location.hash.includes('DetectionMethod')
+      )
+    ];
+
+    return fioriIndicators.some(Boolean);
   }
 
   getUI5ElementContext(element) {

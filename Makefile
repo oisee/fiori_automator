@@ -1,90 +1,66 @@
-# Fiori Test Automation Extension - Makefile
-# Cross-platform build automation
+# Fiori Test Automation Extension Makefile
+# Simple commands for building and deploying the extension
 
-.PHONY: all build clean install test help icons validate dev edge chrome
+.PHONY: all build deploy clean install help validate test
 
 # Default target
 all: build
 
-# Help target
-help:
-	@echo "Fiori Test Automation Extension - Build Targets"
-	@echo "=============================================="
-	@echo "  make build    - Build all extension variants"
-	@echo "  make dev      - Build development version only"
-	@echo "  make edge     - Build Edge-specific version"
-	@echo "  make chrome   - Build Chrome-specific version"
-	@echo "  make clean    - Remove all build artifacts"
-	@echo "  make icons    - Generate icon files"
-	@echo "  make validate - Validate manifest.json"
-	@echo "  make install  - Build and show installation instructions"
-	@echo "  make test     - Run tests (when available)"
-	@echo ""
-
-# Build all variants
-build: clean validate icons
-	@echo "Building extension..."
+# Build and deploy to Windows
+build: validate
+	@echo "🎯 Building and deploying Fiori Test Automation Extension..."
 	@./build.sh
 
-# Development build only
-dev: clean validate
-	@echo "Creating development build..."
-	@mkdir -p dist
-	@cp manifest.json *.js *.html *.css dist/
-	@cp -r icons dist/
-	@echo "✓ Development build ready in dist/"
-
-# Edge-specific build
-edge: build
-	@echo "✓ Edge build available in build/fiori-test-automation-*-edge.zip"
-
-# Chrome-specific build
-chrome: build
-	@echo "✓ Chrome build available in build/fiori-test-automation-*-chrome.zip"
+# Alias for build (deploy to Windows)
+deploy: build
 
 # Clean build artifacts
 clean:
-	@echo "Cleaning build artifacts..."
-	@rm -rf dist/ build/
-	@echo "✓ Clean complete"
+	@echo "🧹 Cleaning build artifacts..."
+	@rm -rf build/
+	@rm -rf /mnt/c/bin/fiori_automator/
+	@rm -f /mnt/c/bin/fiori-test-automation-latest.zip
+	@echo "✅ Clean completed!"
 
-# Generate icons
-icons:
-	@echo "Generating icons..."
-	@./create-icons.sh
+# Install: ensure build script is executable and build
+install:
+	@echo "🔧 Setting up build environment..."
+	@chmod +x build.sh
+	@./build.sh
 
 # Validate manifest
 validate:
-	@echo "Validating manifest.json..."
+	@echo "🔍 Validating manifest.json..."
 	@python3 -m json.tool manifest.json > /dev/null 2>&1 || \
 		node -e "JSON.parse(require('fs').readFileSync('manifest.json'))" 2>/dev/null || \
 		(echo "✗ manifest.json is invalid!" && exit 1)
 	@echo "✓ Manifest is valid"
 
-# Install instructions
-install: build
-	@echo ""
-	@echo "Installation Instructions"
-	@echo "========================"
-	@echo "1. Open Edge: edge://extensions/"
-	@echo "2. Enable 'Developer mode'"
-	@echo "3. Extract: build/fiori-test-automation-*-edge.zip"
-	@echo "4. Click 'Load unpacked' and select the extracted folder"
-	@echo ""
-	@echo "Or for development:"
-	@echo "1. Click 'Load unpacked' and select the 'dist' folder"
-	@echo ""
-
 # Test target (placeholder)
 test:
-	@echo "⚠️  No tests configured yet"
-	@echo "Manual testing required:"
-	@echo "1. Load extension in browser"
+	@echo "⚠️  No automated tests configured yet"
+	@echo "Manual testing steps:"
+	@echo "1. Load extension in Chrome/Edge"
 	@echo "2. Test on a Fiori application"
-	@echo "3. Verify all features work"
+	@echo "3. Verify recording, UI5 context, and markdown export"
 
-# Quick development workflow
-quick: dev
+# Show help
+help:
+	@echo "Fiori Test Automation Extension Build Commands:"
 	@echo ""
-	@echo "Quick development build ready!"
-	@echo "Load the 'dist' folder in your browser"
+	@echo "  make build     - Build extension and copy to Windows (C:\\bin\\fiori_automator\\)"
+	@echo "  make deploy    - Same as build"
+	@echo "  make clean     - Remove all build artifacts and Windows files"
+	@echo "  make install   - Set permissions and build"
+	@echo "  make validate  - Check manifest.json validity"
+	@echo "  make test      - Show manual testing instructions"
+	@echo "  make help      - Show this help message"
+	@echo ""
+	@echo "Windows Installation:"
+	@echo "  1. Run 'make build'"
+	@echo "  2. Open Chrome/Edge -> Extensions -> Developer mode ON"
+	@echo "  3. Load unpacked extension from C:\\bin\\fiori_automator\\"
+	@echo ""
+	@echo "After code changes:"
+	@echo "  1. Run 'make build' again"
+	@echo "  2. Click reload button in browser extension page"
