@@ -689,9 +689,9 @@ class FioriTestBackground {
   }
 
   generateSequentialEventId(session) {
-    // Generate sequential event ID (001, 002, 003, etc.)
+    // Generate sequential event ID (0001, 0002, 0003, etc.)
     const eventNumber = (session.events?.length || 0) + 1;
-    return eventNumber.toString().padStart(3, '0');
+    return eventNumber.toString().padStart(4, '0');
   }
 
   async updateSessionNameIfNeeded(session, event, eventData) {
@@ -1436,41 +1436,26 @@ class FioriTestBackground {
   }
 
   generateScreenshotId(eventType = 'manual', eventId = null, session = null, elementInfo = null) {
-    // Generate semantic screenshot name: 001_click_manage-alerts_button-save
-    const parts = [];
+    // Generate clean screenshot filename: fs-<timestamp>-<session-name>-<event-id>-<event-type>
     
-    // Part 1: Sequential event ID (001, 002, 003...)
-    if (eventId) {
-      parts.push(eventId);
-    } else {
-      const timestamp = Date.now();
-      parts.push(timestamp.toString());
-    }
+    // Get session timestamp and name for consistency with session files
+    const date = new Date(session?.startTime || Date.now());
+    const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD
+    const timeStr = date.toISOString().split('T')[1].slice(0, 5).replace(':', ''); // HHMM
+    const timestamp = `${dateStr}-${timeStr}`;
     
-    // Part 2: Event type
-    parts.push(eventType || 'event');
+    // Get concise session name
+    const sessionNameShort = session ? this.extractConciseSessionName(session) : 'session';
     
-    // Part 3: App context (if available)
-    if (session?.metadata?.appSemantics?.appType) {
-      parts.push(session.metadata.appSemantics.appType);
-    } else if (session?.metadata?.sessionName) {
-      const appSlug = session.metadata.sessionName
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '-')
-        .replace(/-+/g, '-')
-        .slice(0, 20);
-      parts.push(appSlug);
-    }
+    // Format event ID with leading zeros (0001, 0002, etc.)
+    const formattedEventId = eventId ? 
+      eventId.toString().padStart(4, '0') : 
+      Date.now().toString().slice(-4).padStart(4, '0');
     
-    // Part 4: Element semantics (if available)
-    if (elementInfo) {
-      const elementSemantics = this.generateElementSemantics(elementInfo);
-      if (elementSemantics) {
-        parts.push(elementSemantics);
-      }
-    }
+    // Clean event type
+    const cleanEventType = (eventType || 'event').toLowerCase().replace(/[^a-z0-9]/g, '');
     
-    return parts.join('_');
+    return `fs-${timestamp}-${sessionNameShort}-${formattedEventId}-${cleanEventType}`;
   }
 
   generateElementSemantics(elementInfo) {
@@ -1864,48 +1849,99 @@ class FioriTestBackground {
 
   generateSemanticFilename(session, extension = 'json') {
     try {
-      // Create ISO timestamp
-      const timestamp = new Date(session.startTime).toISOString().replace(/[:.]/g, '-').split('T')[0] + 
-                       '_' + new Date(session.startTime).toISOString().replace(/[:.]/g, '-').split('T')[1].slice(0, -5);
+      // Create clean timestamp: YYYY-MM-DD-HHMM
+      const date = new Date(session.startTime);
+      const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD
+      const timeStr = date.toISOString().split('T')[1].slice(0, 5).replace(':', ''); // HHMM
+      const timestamp = `${dateStr}-${timeStr}`;
       
-      // Extract semantics
-      const semantics = session.metadata?.appSemantics;
-      let semanticPart = 'unknown';
+      // Extract concise session name (max 2 words)
+      const sessionNameShort = this.extractConciseSessionName(session);
       
-      if (semantics) {
-        if (semantics.appType !== 'unknown') {
-          semanticPart = semantics.appType;
-          if (semantics.scenario) {
-            semanticPart += `-${semantics.scenario}`;
-          }
-          if (semantics.businessObject) {
-            semanticPart += `-${semantics.businessObject.toLowerCase()}`;
-          }
-        }
-      } else {
-        // Fallback: Try to infer from session name or URL
-        const sessionName = session.metadata?.sessionName || '';
-        const url = session.metadata?.applicationUrl || '';
-        
-        if (sessionName.toLowerCase().includes('manage alerts')) {
-          semanticPart = 'manage-alerts';
-        } else if (sessionName.toLowerCase().includes('launchpad') || url.includes('Shell-home')) {
-          semanticPart = 'fiori-launchpad-home';
-        } else if (url.includes('ComplianceAlert-manage')) {
-          semanticPart = 'manage-alerts';
-        } else if (url.includes('DetectionMethod-manage')) {
-          semanticPart = 'manage-detection-methods';
-        } else {
-          semanticPart = sessionName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20) || 'unknown';
-        }
-      }
-      
-      return `fiori-session-${timestamp}-${semanticPart}.${extension}`;
+      return `fs-${timestamp}-${sessionNameShort}.${extension}`;
     } catch (error) {
       this.logError('Error generating semantic filename:', error);
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      return `fiori-session-${timestamp}-unknown.${extension}`;
+      const timestamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+      return `fs-${timestamp}-session.${extension}`;
     }
+  }
+
+  extractConciseSessionName(session) {
+    // Get session name from various sources
+    const sessionName = session.metadata?.sessionName || '';
+    const url = session.metadata?.applicationUrl || '';
+    
+    // Method 1: Use existing session name if it's good
+    if (sessionName && !sessionName.startsWith('Session ') && sessionName.length <= 20) {
+      return this.cleanNameForFilename(sessionName);
+    }
+    
+    // Method 2: Extract from URL patterns
+    if (url.includes('ComplianceAlert-manage') || url.includes('AlertManagement-manage')) {
+      return 'manage-alerts';
+    }
+    if (url.includes('DetectionMethod-manage')) {
+      return 'detection-methods';
+    }
+    if (url.includes('Shell-home')) {
+      return 'launchpad-home';
+    }
+    
+    // Method 3: Parse Fiori hash to extract meaningful name
+    const hashMatch = url.match(/#(\w+)-(\w+)/);
+    if (hashMatch) {
+      const [, namespace, action] = hashMatch;
+      
+      // Convert camelCase to readable format and take first 2 words
+      const readable = action
+        .replace(/([A-Z])/g, ' $1')
+        .trim()
+        .toLowerCase()
+        .split(' ')
+        .slice(0, 2)
+        .join('-');
+      
+      return readable || 'fiori-app';
+    }
+    
+    // Method 4: Try to extract from full session name
+    if (sessionName) {
+      // Handle specific patterns first
+      const lowerName = sessionName.toLowerCase();
+      if (lowerName.includes('manage alerts')) {
+        return 'manage-alerts';
+      }
+      if (lowerName.includes('detection method')) {
+        return 'detection-methods';
+      }
+      if (lowerName.includes('launchpad')) {
+        return 'launchpad-home';
+      }
+      
+      // General processing - take up to 2 meaningful words
+      const words = sessionName
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(word => word.length > 2 && word !== 'session')
+        .slice(0, 2);
+      
+      if (words.length > 0) {
+        return words.join('-');
+      }
+    }
+    
+    return 'session';
+  }
+
+  cleanNameForFilename(name) {
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(word => word.length > 0)
+      .slice(0, 2)
+      .join('-');
   }
 
   generateImprovedSessionNameFromUrl(url) {
@@ -1914,11 +1950,14 @@ class FioriTestBackground {
     // Known Fiori app mappings
     const fioriAppMappings = {
       'DetectionMethod-manageDetectionMethod': 'Manage Detection Methods',
+      'ComplianceAlert-manage': 'Manage Alerts',
       'Shell-home': 'Fiori Launchpad Home',
       'UserManagement-maintain': 'User Management',
       'Analytics-reporting': 'Analytics & Reporting',
       'WorkflowInbox-displayInbox': 'Workflow Inbox',
-      'BusinessPartner-manage': 'Business Partner Management'
+      'BusinessPartner-manage': 'Business Partner Management',
+      'AlertManagement-manageAlerts': 'Manage Alerts',
+      'DetectionMethod-manage': 'Manage Detection Methods'
     };
 
     // Extract app name from Fiori launchpad URL
