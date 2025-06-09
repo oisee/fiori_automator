@@ -869,31 +869,123 @@ class FioriTestBackground {
   }
 
   correlateNetworkRequests(event, session) {
-    const correlationWindow = 5000; // 5 seconds
+    const correlationWindow = 10000; // Increased to 10 seconds for better causation detection
     const eventTime = event.timestamp;
     
-    // Find network requests within correlation window
+    // Find network requests within correlation window (before and after event)
     const correlatedRequests = [];
     
     for (const [requestId, requestData] of this.networkRequests) {
       if (requestData.tabId === session.tabId) {
-        const timeDiff = Math.abs(requestData.timestamp - eventTime);
-        if (timeDiff <= correlationWindow) {
-          const confidence = Math.max(0, 100 - (timeDiff / correlationWindow * 50));
+        const timeDiff = requestData.timestamp - eventTime; // Allow negative (requests after clicks)
+        const absTimeDiff = Math.abs(timeDiff);
+        
+        if (absTimeDiff <= correlationWindow) {
+          // Enhanced confidence calculation considering causation patterns
+          let confidence = Math.max(0, 100 - (absTimeDiff / correlationWindow * 40));
+          
+          // Boost confidence for likely causation patterns
+          if (this.isLikelyCausationPattern(event, requestData, timeDiff)) {
+            confidence = Math.min(95, confidence + 25);
+          }
+          
+          // Reduce confidence for requests that happened before the click (unlikely causation)
+          if (timeDiff < 0) {
+            confidence = confidence * 0.7;
+          }
+          
           correlatedRequests.push({
             ...requestData,
             correlation: {
-              confidence,
-              timeDifference: timeDiff
+              confidence: Math.round(confidence * 100) / 100,
+              timeDifference: absTimeDiff,
+              causationDirection: timeDiff >= 0 ? 'after-click' : 'before-click',
+              pattern: this.detectCausationPattern(event, requestData)
             }
           });
         }
       }
     }
 
+    // Sort by confidence and time proximity
+    correlatedRequests.sort((a, b) => {
+      if (Math.abs(a.correlation.confidence - b.correlation.confidence) < 5) {
+        return a.correlation.timeDifference - b.correlation.timeDifference;
+      }
+      return b.correlation.confidence - a.correlation.confidence;
+    });
+
     if (correlatedRequests.length > 0) {
       event.correlatedRequests = correlatedRequests;
     }
+  }
+
+  isLikelyCausationPattern(event, requestData, timeDiff) {
+    // Pattern 1: Button clicks followed by OData requests
+    if (event.element?.tagName === 'BUTTON' || 
+        event.element?.className?.includes('Btn') ||
+        event.element?.id?.includes('Button') ||
+        event.element?.id?.includes('Btn')) {
+      if (timeDiff >= 0 && timeDiff <= 3000 && requestData.type?.includes('odata')) {
+        return true;
+      }
+    }
+
+    // Pattern 2: "Go" button specifically
+    if (event.element?.textContent?.includes('Go') || 
+        event.element?.id?.includes('btnGo')) {
+      if (timeDiff >= 0 && timeDiff <= 5000 && requestData.type?.includes('odata')) {
+        return true;
+      }
+    }
+
+    // Pattern 3: Assign button specifically
+    if (event.element?.textContent?.includes('Assign') || 
+        event.element?.id?.includes('assign') ||
+        event.element?.id?.includes('Assign')) {
+      if (timeDiff >= 0 && timeDiff <= 3000 && 
+          (requestData.requestBody?.includes('SetMeAsResponsiblePerson') ||
+           requestData.url?.includes('SetMeAsResponsiblePerson'))) {
+        return true;
+      }
+    }
+
+    // Pattern 4: Link clicks followed by detail requests
+    if (event.element?.tagName === 'A' || event.element?.className?.includes('Link')) {
+      if (timeDiff >= 0 && timeDiff <= 4000 && requestData.type?.includes('odata')) {
+        return true;
+      }
+    }
+
+    // Pattern 5: Filter selection followed by data requests
+    if (event.element?.id?.includes('filter') || 
+        event.element?.id?.includes('Filter') ||
+        event.element?.className?.includes('Filter')) {
+      if (timeDiff >= 0 && timeDiff <= 4000 && requestData.type?.includes('odata')) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  detectCausationPattern(event, requestData) {
+    if (event.element?.textContent?.includes('Go')) {
+      return 'filter-execution';
+    }
+    if (event.element?.textContent?.includes('Assign')) {
+      return 'assignment-action';
+    }
+    if (event.element?.tagName === 'A') {
+      return 'navigation-action';
+    }
+    if (event.element?.id?.includes('filter')) {
+      return 'filter-selection';
+    }
+    if (requestData.type?.includes('odata-batch')) {
+      return 'data-retrieval';
+    }
+    return 'generic-interaction';
   }
 
   async saveSession(session) {
