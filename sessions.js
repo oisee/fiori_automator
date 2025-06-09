@@ -239,6 +239,20 @@ class SessionsManager {
       details.push(`Value: ${event.value}`);
     }
     
+    // Show coalescing information for input events
+    if (event.isCoalesced) {
+      details.push(`📝 Coalesced Input: ${event.editCount} edits over ${Math.round(event.duration / 1000)}s`);
+      if (event.initialValue && event.finalValue && event.initialValue !== event.finalValue) {
+        details.push(`   "${event.initialValue}" → "${event.finalValue}"`);
+      }
+      if (event.hadBackspace) {
+        details.push(`   🔙 Used backspace`);
+      }
+      if (event.hadPause) {
+        details.push(`   ⏸️ Had pause`);
+      }
+    }
+    
     if (event.correlatedRequests && event.correlatedRequests.length > 0) {
       details.push(`Correlated OData: ${event.correlatedRequests.length} request(s)`);
     }

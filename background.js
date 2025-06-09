@@ -440,7 +440,8 @@ class FioriTestBackground {
         ...eventData
       };
 
-      session.events.push(event);
+      // Apply input event coalescing
+      this.addEventWithCoalescing(session, event);
       
       // Correlate with recent network requests
       this.correlateNetworkRequests(event, session);
@@ -455,6 +456,153 @@ class FioriTestBackground {
       // Broadcast updated session state
       this.broadcastSessionUpdate(tabId);
     }
+  }
+
+  addEventWithCoalescing(session, newEvent) {
+    // Configuration for coalescing
+    const COALESCING_TIME_THRESHOLD = 1500; // 1.5 seconds
+    const COALESCING_ENABLED = true;
+
+    if (!COALESCING_ENABLED || newEvent.type !== 'input') {
+      // No coalescing needed, add event normally
+      session.events.push(newEvent);
+      return;
+    }
+
+    // Check if we can coalesce with the last event
+    const lastEvent = session.events[session.events.length - 1];
+    
+    if (this.canCoalesceInputEvents(lastEvent, newEvent, COALESCING_TIME_THRESHOLD)) {
+      // Update the last event instead of adding a new one
+      this.coalesceInputEvent(lastEvent, newEvent);
+      this.log(`Input event coalesced: ${newEvent.element?.id} -> "${newEvent.value}"`);
+    } else {
+      // Cannot coalesce, add as new event
+      session.events.push(newEvent);
+    }
+  }
+
+  canCoalesceInputEvents(lastEvent, newEvent, timeThreshold) {
+    if (!lastEvent || lastEvent.type !== 'input' || newEvent.type !== 'input') {
+      return false;
+    }
+
+    // Check if targeting same element
+    const sameElement = lastEvent.element?.id === newEvent.element?.id;
+    if (!sameElement) {
+      return false;
+    }
+
+    // Check time threshold
+    const timeDelta = newEvent.timestamp - lastEvent.timestamp;
+    if (timeDelta > timeThreshold) {
+      return false;
+    }
+
+    // Check if the new value is a logical progression
+    return this.isProgressiveInput(lastEvent.value || '', newEvent.value || '');
+  }
+
+  isProgressiveInput(oldValue, newValue) {
+    // Both should be strings
+    if (typeof oldValue !== 'string' || typeof newValue !== 'string') {
+      return false;
+    }
+
+    // New value should be either:
+    // 1. An extension of old value (typing)
+    // 2. A truncation of old value (backspace)
+    // 3. Similar with small character changes (typo correction)
+    
+    const lengthDiff = newValue.length - oldValue.length;
+    
+    // Simple append case (typing)
+    if (lengthDiff > 0 && newValue.startsWith(oldValue)) {
+      return true;
+    }
+    
+    // Simple truncation case (backspace)
+    if (lengthDiff < 0 && oldValue.startsWith(newValue)) {
+      return true;
+    }
+    
+    // Small edits (character replacements, insertions in middle)
+    if (Math.abs(lengthDiff) <= 3) {
+      const similarity = this.calculateStringSimilarity(oldValue, newValue);
+      return similarity > 0.7; // 70% similarity threshold
+    }
+    
+    return false;
+  }
+
+  calculateStringSimilarity(str1, str2) {
+    // Simple similarity calculation using Levenshtein distance
+    const matrix = [];
+    
+    for (let i = 0; i <= str2.length; i++) {
+      matrix[i] = [i];
+    }
+    
+    for (let j = 0; j <= str1.length; j++) {
+      matrix[0][j] = j;
+    }
+    
+    for (let i = 1; i <= str2.length; i++) {
+      for (let j = 1; j <= str1.length; j++) {
+        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1];
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
+          );
+        }
+      }
+    }
+    
+    const maxLength = Math.max(str1.length, str2.length);
+    if (maxLength === 0) return 1;
+    
+    return (maxLength - matrix[str2.length][str1.length]) / maxLength;
+  }
+
+  coalesceInputEvent(lastEvent, newEvent) {
+    // Update the existing event with new information
+    lastEvent.endTime = newEvent.timestamp;
+    lastEvent.duration = lastEvent.endTime - lastEvent.timestamp;
+    lastEvent.value = newEvent.value;
+    lastEvent.finalValue = newEvent.value;
+    
+    // Track intermediate values for analysis
+    if (!lastEvent.intermediateValues) {
+      lastEvent.intermediateValues = [lastEvent.initialValue || lastEvent.value];
+    }
+    lastEvent.intermediateValues.push(newEvent.value);
+    
+    // Update metadata
+    lastEvent.editCount = (lastEvent.editCount || 1) + 1;
+    lastEvent.isCoalesced = true;
+    
+    // Keep initial value for reference
+    if (!lastEvent.initialValue) {
+      lastEvent.initialValue = lastEvent.intermediateValues[0];
+    }
+    
+    // Analysis flags
+    lastEvent.hadBackspace = this.detectBackspace(lastEvent.intermediateValues);
+    lastEvent.hadPause = (newEvent.timestamp - lastEvent.timestamp) > 500; // 500ms pause
+    
+    this.log(`Coalesced: "${lastEvent.initialValue}" -> "${lastEvent.finalValue}" (${lastEvent.editCount} edits)`);
+  }
+
+  detectBackspace(values) {
+    for (let i = 1; i < values.length; i++) {
+      if (values[i].length < values[i - 1].length) {
+        return true;
+      }
+    }
+    return false;
   }
 
   broadcastStateChange(tabId, state) {
@@ -531,7 +679,7 @@ class FioriTestBackground {
 
   cleanEventData(event) {
     try {
-      return {
+      const baseEvent = {
         eventId: event.eventId,
         timestamp: event.timestamp,
         type: event.type,
@@ -558,6 +706,25 @@ class FioriTestBackground {
           correlation: req.correlation
         })) || []
       };
+
+      // Add coalescing-specific fields if present
+      if (event.isCoalesced) {
+        baseEvent.isCoalesced = true;
+        baseEvent.editCount = event.editCount;
+        baseEvent.initialValue = event.initialValue;
+        baseEvent.finalValue = event.finalValue;
+        baseEvent.endTime = event.endTime;
+        baseEvent.duration = event.duration;
+        baseEvent.hadBackspace = event.hadBackspace;
+        baseEvent.hadPause = event.hadPause;
+        
+        // Optionally include intermediate values (can be large)
+        if (event.intermediateValues && event.intermediateValues.length < 50) {
+          baseEvent.intermediateValues = event.intermediateValues;
+        }
+      }
+
+      return baseEvent;
     } catch (error) {
       return {
         eventId: event.eventId,
@@ -744,6 +911,54 @@ class FioriTestBackground {
       const v = c == 'x' ? r : (r & 0x3 | 0x8);
       return v.toString(16);
     });
+  }
+
+  // Utility function to analyze coalesced events in a session
+  analyzeCoalescedEvents(session) {
+    const stats = {
+      totalEvents: session.events.length,
+      inputEvents: 0,
+      coalescedEvents: 0,
+      averageEditCount: 0,
+      longestEditSession: 0,
+      totalEditingTime: 0,
+      elementsEdited: new Set()
+    };
+
+    let totalEditCount = 0;
+    
+    session.events.forEach(event => {
+      if (event.type === 'input') {
+        stats.inputEvents++;
+        
+        if (event.isCoalesced) {
+          stats.coalescedEvents++;
+          const editCount = event.editCount || 1;
+          totalEditCount += editCount;
+          
+          if (editCount > stats.longestEditSession) {
+            stats.longestEditSession = editCount;
+          }
+          
+          if (event.duration) {
+            stats.totalEditingTime += event.duration;
+          }
+          
+          if (event.element?.id) {
+            stats.elementsEdited.add(event.element.id);
+          }
+        }
+      }
+    });
+
+    if (stats.coalescedEvents > 0) {
+      stats.averageEditCount = totalEditCount / stats.coalescedEvents;
+    }
+
+    stats.elementsEditedCount = stats.elementsEdited.size;
+    delete stats.elementsEdited; // Convert Set to count
+
+    return stats;
   }
 }
 
