@@ -604,13 +604,15 @@ class FioriTestPopup {
       });
 
       if (response && response.success) {
-        // Create and download the zip file
-        const blob = new Blob([response.zipData], { type: 'application/zip' });
+        // For now, just create a markdown file (not a zip)
+        // In the future, this could be enhanced to include screenshots in a zip
+        const markdownContent = response.zipData; // This is actually markdown content
+        const blob = new Blob([markdownContent], { type: 'text/markdown' });
         const url = URL.createObjectURL(blob);
         
         const a = document.createElement('a');
         a.href = url;
-        a.download = `fiori-session-${this.currentState.sessionId}-export.zip`;
+        a.download = `fiori-session-${this.currentState.sessionId}-export.md`;
         a.click();
         
         URL.revokeObjectURL(url);

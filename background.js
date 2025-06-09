@@ -967,7 +967,13 @@ class FioriTestBackground {
 
   async captureTabScreenshot(tabId, elementInfo) {
     try {
-      const screenshot = await chrome.tabs.captureVisibleTab(null, {
+      // Get the current tab info
+      const tab = await chrome.tabs.get(tabId);
+      if (!tab) {
+        throw new Error('Tab not found');
+      }
+
+      const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, {
         format: 'png',
         quality: 90
       });
@@ -976,7 +982,12 @@ class FioriTestBackground {
         dataUrl: screenshot,
         timestamp: Date.now(),
         tabId: tabId,
-        elementInfo: elementInfo || null
+        elementInfo: elementInfo || null,
+        pageInfo: {
+          url: tab.url,
+          title: tab.title,
+          windowId: tab.windowId
+        }
       };
     } catch (error) {
       this.logError('Failed to capture screenshot:', error);

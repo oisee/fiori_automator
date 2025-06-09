@@ -58,6 +58,10 @@ class SessionsManager {
       this.exportSession(this.selectedSession);
     });
 
+    document.getElementById('modalExportMarkdownBtn').addEventListener('click', () => {
+      this.exportSessionAsMarkdown(this.selectedSession);
+    });
+
     document.getElementById('modalReplayBtn').addEventListener('click', () => {
       this.replaySession(this.selectedSession);
     });
@@ -299,6 +303,38 @@ class SessionsManager {
     }
   }
 
+  async exportSessionAsMarkdown(session) {
+    try {
+      this.showNotification('Generating markdown export...', 'info');
+      
+      const response = await chrome.runtime.sendMessage({
+        type: 'export-session-markdown',
+        sessionId: session.sessionId
+      });
+
+      if (response && response.success) {
+        const markdownContent = response.zipData; // This is actually markdown content
+        const blob = new Blob([markdownContent], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `fiori-session-${session.sessionId}-export.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        URL.revokeObjectURL(url);
+        this.showNotification('Markdown export completed!');
+      } else {
+        throw new Error(response?.error || 'Export failed');
+      }
+    } catch (error) {
+      console.error('Markdown export failed:', error);
+      this.showNotification('Markdown export failed', 'error');
+    }
+  }
+
   async exportAllSessions() {
     try {
       const allData = {
@@ -363,6 +399,22 @@ class SessionsManager {
 
   showNotification(message, type = 'success') {
     const notification = document.createElement('div');
+    
+    let bgColor;
+    switch(type) {
+      case 'success':
+        bgColor = '#4caf50';
+        break;
+      case 'error':
+        bgColor = '#f44336';
+        break;
+      case 'info':
+        bgColor = '#2196f3';
+        break;
+      default:
+        bgColor = '#4caf50';
+    }
+    
     notification.style.cssText = `
       position: fixed;
       top: 20px;
@@ -371,10 +423,8 @@ class SessionsManager {
       border-radius: 6px;
       font-size: 14px;
       z-index: 1001;
-      ${type === 'success' 
-        ? 'background: #4caf50; color: white;' 
-        : 'background: #f44336; color: white;'
-      }
+      background: ${bgColor};
+      color: white;
     `;
     notification.textContent = message;
     
@@ -382,7 +432,7 @@ class SessionsManager {
     
     setTimeout(() => {
       notification.remove();
-    }, 3000);
+    }, type === 'info' ? 2000 : 3000);
   }
 }
 

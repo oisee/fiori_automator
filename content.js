@@ -376,7 +376,9 @@ class FioriTestCapture {
         theme: window.sap.ui.getCore()?.getConfiguration()?.getTheme(),
         locale: window.sap.ui.getCore()?.getConfiguration()?.getLocale()?.toString(),
         libraries: Object.keys(window.sap.ui.getCore()?.getLoadedLibraries() || {}),
-        isUI5App: true
+        isUI5App: true,
+        coreLoaded: !!window.sap.ui.getCore(),
+        hasUIAreas: (window.sap.ui.getCore()?.getUIAreas() || []).length > 0
       };
       
       console.log('Fiori Test Capture: SAPUI5 detected', this.ui5Context);
@@ -391,30 +393,126 @@ class FioriTestCapture {
     }
 
     try {
-      // Try to get UI5 control from element
-      const control = window.sap.ui.getCore().byId(element.id);
-      if (control) {
-        return {
-          controlType: control.getMetadata().getName(),
-          controlId: control.getId(),
-          properties: this.getControlProperties(control),
-          bindingInfo: this.getBindingInfo(control)
-        };
+      const core = window.sap.ui.getCore();
+      if (!core) {
+        return null;
       }
 
-      // Try to find parent UI5 control
-      let parentElement = element.parentElement;
-      while (parentElement) {
-        const parentControl = window.sap.ui.getCore().byId(parentElement.id);
-        if (parentControl) {
+      // Method 1: Direct control lookup by ID
+      if (element.id) {
+        const control = core.byId(element.id);
+        if (control) {
           return {
-            parentControlType: parentControl.getMetadata().getName(),
-            parentControlId: parentControl.getId(),
-            elementRole: 'child'
+            controlType: control.getMetadata().getName(),
+            controlId: control.getId(),
+            properties: this.getControlProperties(control),
+            bindingInfo: this.getBindingInfo(control),
+            method: 'direct-id'
           };
         }
-        parentElement = parentElement.parentElement;
       }
+
+      // Method 2: Use jQuery UI5 plugin if available
+      if (window.jQuery && window.jQuery.fn.control) {
+        try {
+          const $element = window.jQuery(element);
+          const control = $element.control();
+          if (control && control.length > 0) {
+            const ui5Control = control[0];
+            return {
+              controlType: ui5Control.getMetadata().getName(),
+              controlId: ui5Control.getId(),
+              properties: this.getControlProperties(ui5Control),
+              bindingInfo: this.getBindingInfo(ui5Control),
+              method: 'jquery-plugin'
+            };
+          }
+        } catch (e) {
+          // jQuery method failed, continue
+        }
+      }
+
+      // Method 3: Look for UI5 control data attributes
+      let currentElement = element;
+      while (currentElement && currentElement !== document.body) {
+        // Check for UI5 control data
+        if (currentElement.dataset && currentElement.dataset.sapUi) {
+          const controlId = currentElement.dataset.sapUi;
+          const control = core.byId(controlId);
+          if (control) {
+            return {
+              controlType: control.getMetadata().getName(),
+              controlId: control.getId(),
+              properties: this.getControlProperties(control),
+              bindingInfo: this.getBindingInfo(control),
+              method: 'data-attribute',
+              elementRole: currentElement === element ? 'direct' : 'descendant'
+            };
+          }
+        }
+
+        // Check for UI5 control marker attributes
+        const attributes = currentElement.attributes;
+        for (let i = 0; i < attributes.length; i++) {
+          const attr = attributes[i];
+          if (attr.name.startsWith('data-sap-ui') || attr.name.includes('ui5')) {
+            // This element has UI5 markers, try to find control
+            if (currentElement.id) {
+              const control = core.byId(currentElement.id);
+              if (control) {
+                return {
+                  controlType: control.getMetadata().getName(),
+                  controlId: control.getId(),
+                  properties: this.getControlProperties(control),
+                  bindingInfo: this.getBindingInfo(control),
+                  method: 'ui5-marker',
+                  elementRole: currentElement === element ? 'direct' : 'ancestor'
+                };
+              }
+            }
+          }
+        }
+
+        currentElement = currentElement.parentElement;
+      }
+
+      // Method 4: UI Area traversal
+      const uiAreas = core.getUIAreas();
+      for (let area of uiAreas) {
+        if (area.getDomRef() && area.getDomRef().contains(element)) {
+          // Element is within this UI area, try to find closest control
+          const controls = this.findControlsInUIArea(area, element);
+          if (controls.length > 0) {
+            const closestControl = controls[0]; // Take the first (closest) control
+            return {
+              controlType: closestControl.getMetadata().getName(),
+              controlId: closestControl.getId(),
+              properties: this.getControlProperties(closestControl),
+              bindingInfo: this.getBindingInfo(closestControl),
+              method: 'ui-area-traversal',
+              elementRole: 'within-control',
+              uiAreaId: area.getId()
+            };
+          }
+
+          // If no specific control found, return UI area info
+          return {
+            controlType: 'sap.ui.core.UIArea',
+            controlId: area.getId(),
+            properties: {},
+            bindingInfo: {},
+            method: 'ui-area',
+            elementRole: 'within-area'
+          };
+        }
+      }
+
+      // Method 5: Check if element is within any known UI5 component
+      const componentInfo = this.findUI5Component(element);
+      if (componentInfo) {
+        return componentInfo;
+      }
+
     } catch (error) {
       console.warn('Error getting UI5 context:', error);
     }
@@ -465,6 +563,256 @@ class FioriTestCapture {
     } catch (error) {
       return {};
     }
+  }
+
+  findControlsInUIArea(uiArea, targetElement) {
+    const controls = [];
+    
+    try {
+      // Get all controls in the UI area
+      const areaControls = uiArea.getContent();
+      
+      for (let control of areaControls) {
+        const controlDom = control.getDomRef();
+        if (controlDom && controlDom.contains(targetElement)) {
+          controls.push(control);
+          
+          // Also check nested controls
+          const nestedControls = this.findNestedControls(control, targetElement);
+          controls.push(...nestedControls);
+        }
+      }
+    } catch (error) {
+      console.warn('Error finding controls in UI area:', error);
+    }
+    
+    return controls;
+  }
+
+  findNestedControls(parentControl, targetElement) {
+    const controls = [];
+    
+    try {
+      // Check if this control has aggregations
+      const metadata = parentControl.getMetadata();
+      const aggregations = metadata.getAllAggregations();
+      
+      Object.keys(aggregations).forEach(aggName => {
+        try {
+          const getter = `get${aggName.charAt(0).toUpperCase() + aggName.slice(1)}`;
+          if (typeof parentControl[getter] === 'function') {
+            const aggContent = parentControl[getter]();
+            
+            if (Array.isArray(aggContent)) {
+              aggContent.forEach(child => {
+                if (child && typeof child.getDomRef === 'function') {
+                  const childDom = child.getDomRef();
+                  if (childDom && childDom.contains(targetElement)) {
+                    controls.push(child);
+                    // Recursively check nested controls
+                    const nested = this.findNestedControls(child, targetElement);
+                    controls.push(...nested);
+                  }
+                }
+              });
+            } else if (aggContent && typeof aggContent.getDomRef === 'function') {
+              const childDom = aggContent.getDomRef();
+              if (childDom && childDom.contains(targetElement)) {
+                controls.push(aggContent);
+                const nested = this.findNestedControls(aggContent, targetElement);
+                controls.push(...nested);
+              }
+            }
+          }
+        } catch (e) {
+          // Skip this aggregation if there's an error
+        }
+      });
+    } catch (error) {
+      console.warn('Error finding nested controls:', error);
+    }
+    
+    return controls;
+  }
+
+  findUI5Component(element) {
+    try {
+      // Look for component information in the element's class names or IDs
+      const elementInfo = {
+        id: element.id,
+        className: element.className,
+        tagName: element.tagName
+      };
+
+      // Enhanced semantic detection for Fiori controls
+      const semanticInfo = this.detectSemanticRole(element);
+
+      // Check for Fiori app component patterns
+      if (element.id && element.id.includes('component')) {
+        const componentMatch = element.id.match(/([^-]+)-([^-]+)-component/);
+        if (componentMatch) {
+          return {
+            controlType: 'sap.ui.core.Component',
+            controlId: element.id,
+            properties: {
+              componentName: `${componentMatch[1]}.${componentMatch[2]}`,
+              elementType: 'component-element',
+              ...semanticInfo
+            },
+            bindingInfo: {},
+            method: 'component-pattern',
+            elementRole: 'component-child'
+          };
+        }
+      }
+
+      // Check for view patterns
+      if (element.className && element.className.includes('sapUiView')) {
+        return {
+          controlType: 'sap.ui.core.mvc.View',
+          controlId: element.id || 'unknown-view',
+          properties: {
+            viewType: 'unknown',
+            elementType: 'view-element',
+            ...semanticInfo
+          },
+          bindingInfo: {},
+          method: 'view-pattern',
+          elementRole: 'view-child'
+        };
+      }
+
+      // Check for control-specific class patterns
+      const sapClasses = element.className.split(' ').filter(cls => cls.startsWith('sap'));
+      if (sapClasses.length > 0) {
+        const controlType = this.inferControlTypeFromClasses(sapClasses);
+        return {
+          controlType: controlType || 'sap.ui.core.Control',
+          controlId: element.id || 'unknown-control',
+          properties: {
+            sapClasses: sapClasses,
+            elementType: 'sap-styled-element',
+            ...semanticInfo
+          },
+          bindingInfo: {},
+          method: 'css-pattern',
+          elementRole: 'styled-element'
+        };
+      }
+
+    } catch (error) {
+      console.warn('Error finding UI5 component:', error);
+    }
+
+    return null;
+  }
+
+  detectSemanticRole(element) {
+    const semantic = {};
+    
+    // Detect common UI patterns
+    if (element.tagName === 'INPUT') {
+      semantic.inputType = element.type || 'text';
+      semantic.placeholder = element.placeholder;
+      semantic.required = element.required;
+      semantic.semanticRole = 'input-field';
+    } else if (element.tagName === 'BUTTON') {
+      semantic.buttonText = element.textContent?.trim();
+      semantic.semanticRole = 'action-button';
+    } else if (element.tagName === 'SELECT') {
+      semantic.semanticRole = 'dropdown';
+    } else if (element.tagName === 'TABLE') {
+      semantic.semanticRole = 'data-table';
+    }
+
+    // Detect Fiori-specific patterns
+    const classNames = element.className || '';
+    
+    // Form elements
+    if (classNames.includes('sapMInput')) {
+      semantic.fioriControl = 'sap.m.Input';
+      semantic.semanticRole = 'input-field';
+    } else if (classNames.includes('sapMButton')) {
+      semantic.fioriControl = 'sap.m.Button';
+      semantic.semanticRole = 'action-button';
+    } else if (classNames.includes('sapMComboBox')) {
+      semantic.fioriControl = 'sap.m.ComboBox';
+      semantic.semanticRole = 'combobox';
+    } else if (classNames.includes('sapMText')) {
+      semantic.fioriControl = 'sap.m.Text';
+      semantic.semanticRole = 'display-text';
+    } else if (classNames.includes('sapMLabel')) {
+      semantic.fioriControl = 'sap.m.Label';
+      semantic.semanticRole = 'field-label';
+    }
+
+    // Navigation elements
+    if (classNames.includes('sapUshellTile')) {
+      semantic.fioriControl = 'sap.ushell.ui.tile';
+      semantic.semanticRole = 'navigation-tile';
+    } else if (classNames.includes('sapMNavContainer')) {
+      semantic.fioriControl = 'sap.m.NavContainer';
+      semantic.semanticRole = 'navigation-container';
+    }
+
+    // Layout elements
+    if (classNames.includes('sapUiTable')) {
+      semantic.fioriControl = 'sap.ui.table.Table';
+      semantic.semanticRole = 'data-table';
+    } else if (classNames.includes('sapMList')) {
+      semantic.fioriControl = 'sap.m.List';
+      semantic.semanticRole = 'item-list';
+    }
+
+    // Page elements
+    if (classNames.includes('sapMPage')) {
+      semantic.fioriControl = 'sap.m.Page';
+      semantic.semanticRole = 'page-container';
+    } else if (classNames.includes('sapMPanel')) {
+      semantic.fioriControl = 'sap.m.Panel';
+      semantic.semanticRole = 'content-panel';
+    }
+
+    // Business context from ID patterns
+    if (element.id) {
+      if (element.id.includes('filterBar')) {
+        semantic.businessContext = 'search-and-filter';
+      } else if (element.id.includes('worklist') || element.id.includes('table')) {
+        semantic.businessContext = 'data-display';
+      } else if (element.id.includes('form') || element.id.includes('dialog')) {
+        semantic.businessContext = 'data-entry';
+      } else if (element.id.includes('detail') || element.id.includes('object')) {
+        semantic.businessContext = 'detail-view';
+      }
+    }
+
+    return semantic;
+  }
+
+  inferControlTypeFromClasses(sapClasses) {
+    // Map common SAP CSS classes to likely control types
+    const controlMap = {
+      'sapMInput': 'sap.m.Input',
+      'sapMButton': 'sap.m.Button',
+      'sapMText': 'sap.m.Text',
+      'sapMLabel': 'sap.m.Label',
+      'sapMComboBox': 'sap.m.ComboBox',
+      'sapMSelect': 'sap.m.Select',
+      'sapMTable': 'sap.m.Table',
+      'sapMList': 'sap.m.List',
+      'sapMPanel': 'sap.m.Panel',
+      'sapMPage': 'sap.m.Page',
+      'sapUiTable': 'sap.ui.table.Table',
+      'sapUshellTile': 'sap.ushell.ui.tile.TileBase'
+    };
+
+    for (let className of sapClasses) {
+      if (controlMap[className]) {
+        return controlMap[className];
+      }
+    }
+
+    return null;
   }
 
   async captureScreenshot() {
