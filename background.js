@@ -1319,6 +1319,14 @@ class FioriTestBackground {
       const result = await chrome.storage.local.get(['fioriSessions']);
       const sessions = result.fioriSessions || {};
       
+      // Enhance session with Fiori App ID detection
+      const fioriAppId = this.extractFioriAppId(session);
+      if (fioriAppId) {
+        session.metadata.fioriAppId = fioriAppId;
+        session.metadata.fioriAppsLibraryInfo = await this.queryFioriAppsLibraryAPI(fioriAppId);
+        this.log('Enhanced session with Fiori App ID:', fioriAppId);
+      }
+      
       // Clean session data before saving
       const cleanSession = this.cleanSessionData(session);
       sessions[session.sessionId] = cleanSession;
@@ -2630,14 +2638,84 @@ class FioriTestBackground {
       return 'manage-alerts';
     }
     
-    // General case - up to 2 words
+    // General case - up to 3 words
     return name
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, ' ')
       .split(/\s+/)
       .filter(word => word.length > 0)
-      .slice(0, 2)
+      .slice(0, 3)
       .join('-');
+  }
+
+  // Enhanced Fiori App Detection
+  extractFioriAppId(session) {
+    try {
+      const url = session.metadata?.applicationUrl || '';
+      const events = session.events || [];
+      const requests = session.networkRequests || [];
+
+      // Method 1: Extract from URL hash patterns
+      const hashMatch = url.match(/#([A-Z]\d{4})-/);
+      if (hashMatch) {
+        return hashMatch[1]; // Returns F1730, F2305, etc.
+      }
+
+      // Method 2: Extract from Fiori Apps Library URL patterns
+      const libraryMatch = url.match(/inpfioriId='([A-Z]\d{4})'/);
+      if (libraryMatch) {
+        return libraryMatch[1];
+      }
+
+      // Method 3: Look for app manifest requests in network requests
+      const manifestRequest = requests.find(req => 
+        req.url && req.url.includes('manifest.json')
+      );
+      if (manifestRequest) {
+        // Could parse manifest.json content if available
+        const appIdMatch = manifestRequest.url.match(/apps\/([A-Z]\d{4})\//);
+        if (appIdMatch) {
+          return appIdMatch[1];
+        }
+      }
+
+      // Method 4: Look for Fiori Apps Library API calls
+      const apiRequest = requests.find(req => 
+        req.url && req.url.includes('SingleApp.xsodata') && req.url.includes('fioriId=')
+      );
+      if (apiRequest) {
+        const apiMatch = apiRequest.url.match(/fioriId='([A-Z]\d{4})'/);
+        if (apiMatch) {
+          return apiMatch[1];
+        }
+      }
+
+      return null;
+    } catch (error) {
+      this.logError('Error extracting Fiori App ID:', error);
+      return null;
+    }
+  }
+
+  async queryFioriAppsLibraryAPI(appId) {
+    try {
+      if (!appId || !/^[A-Z]\d{4}$/.test(appId)) {
+        return null;
+      }
+
+      // Note: This would typically be called from content script due to CORS
+      // For now, we'll store the API URL pattern for future implementation
+      const apiUrl = `https://fioriappslibrary.hana.ondemand.com/sap/fix/externalViewer/services/SingleApp.xsodata/Details(inpfioriId='${appId}',inpreleaseId='S14OP',inpLanguage='None',fioriId='${appId}',releaseId='S14OP')/RequiredODataServices`;
+      
+      return {
+        appId: appId,
+        apiUrl: apiUrl,
+        metadataUrl: 'https://fioriappslibrary.hana.ondemand.com/sap/fix/externalViewer/services/SingleApp.xsodata/$metadata'
+      };
+    } catch (error) {
+      this.logError('Error querying Fiori Apps Library API:', error);
+      return null;
+    }
   }
 
   generateImprovedSessionNameFromUrl(url) {
@@ -2651,6 +2729,7 @@ class FioriTestBackground {
       'UserManagement-maintain': 'User Management',
       'Analytics-reporting': 'Analytics & Reporting',
       'WorkflowInbox-displayInbox': 'Workflow Inbox',
+      'fioriappslibrary.hana.ondemand.com': 'SAP Fiori Apps Library',
       'BusinessPartner-manage': 'Business Partner Management',
       'AlertManagement-manageAlerts': 'Manage Alerts',
       'DetectionMethod-manage': 'Manage Detection Methods'
