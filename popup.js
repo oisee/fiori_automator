@@ -612,7 +612,8 @@ class FioriTestPopup {
         
         const a = document.createElement('a');
         a.href = url;
-        a.download = `fiori-session-${this.currentState.sessionId}-export.md`;
+        // Use semantic filename from response or fallback
+        a.download = response.filename || `fiori-session-${this.currentState.sessionId}-export.md`;
         a.click();
         
         URL.revokeObjectURL(url);

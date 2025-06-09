@@ -156,6 +156,9 @@ class FioriTestCapture {
     const element = event.target;
     const rect = element.getBoundingClientRect();
     
+    // Capture screenshot asynchronously (don't block the event)
+    const screenshotPromise = this.captureElementScreenshot(element);
+    
     const eventData = {
       type: 'click',
       coordinates: {
@@ -168,7 +171,6 @@ class FioriTestCapture {
       },
       element: await this.getElementInfo(element),
       ui5Context: this.getUI5ElementContext(element),
-      screenshot: await this.captureElementScreenshot(element),
       modifiers: {
         ctrlKey: event.ctrlKey,
         shiftKey: event.shiftKey,
@@ -176,6 +178,16 @@ class FioriTestCapture {
         metaKey: event.metaKey
       }
     };
+
+    // Add screenshot when available (async)
+    screenshotPromise.then(screenshot => {
+      if (screenshot) {
+        eventData.screenshot = screenshot;
+        this.log('Screenshot captured for click event:', screenshot);
+      }
+    }).catch(error => {
+      this.log('Screenshot capture failed for click event:', error);
+    });
 
     this.log('Click captured:', eventData);
     await this.sendEventToBackground(eventData);
@@ -384,90 +396,24 @@ class FioriTestCapture {
 
   injectUI5DetectionScript() {
     try {
+      // Use external script to avoid CSP violations with inline scripts
       const script = document.createElement('script');
-      script.textContent = `
-        (function() {
-          try {
-            const detection = {
-              isSAPUI5: false,
-              isFiori: false,
-              hasCore: false,
-              loadedLibraries: [],
-              theme: null,
-              locale: null,
-              version: null,
-              viewIdPrefixDetected: false,
-              fioriClassDetected: false,
-              uiAreas: [],
-              components: [],
-              detectionMethod: 'injected-script'
-            };
-
-            // Check for SAPUI5/OpenUI5
-            if (window.sap?.ui?.getCore) {
-              const core = window.sap.ui.getCore();
-              detection.isSAPUI5 = true;
-              detection.hasCore = true;
-              detection.version = window.sap.ui.version;
-
-              try {
-                detection.loadedLibraries = Object.keys(core.getLoadedLibraries?.() || {});
-                detection.theme = core.getConfiguration?.().getTheme?.();
-                detection.locale = core.getConfiguration?.().getLocale?.().toString();
-                detection.uiAreas = core.getUIAreas?.().map(area => ({
-                  id: area.getId?.(),
-                  content: area.getContent?.().length || 0
-                })) || [];
-
-                // Get component information
-                const componentRegistry = window.sap.ui.getCore().getComponentRegistry?.();
-                if (componentRegistry) {
-                  detection.components = Object.keys(componentRegistry).map(id => ({
-                    id: id,
-                    manifest: componentRegistry[id].getManifest?.()?.['sap.app']?.id
-                  }));
-                }
-              } catch (e) {
-                console.warn('Error getting UI5 core details:', e);
-              }
-
-              // Heuristic: Fiori app detection by ID patterns
-              detection.viewIdPrefixDetected = !!document.querySelector('[id^="application-"][id*="--"]');
-              
-              // Heuristic: Fiori shell/page detection
-              detection.fioriClassDetected = !!(
-                document.querySelector('.sapMPage, .sapUshellShell, .sapUshellTileContainer') ||
-                document.querySelector('[class*="sapMObject"]') ||
-                document.querySelector('[class*="sapUshell"]')
-              );
-
-              detection.isFiori = detection.viewIdPrefixDetected || detection.fioriClassDetected;
-            }
-
-            // Dispatch result to content script
-            window.dispatchEvent(new CustomEvent('SAPUI5DetectionResult', { 
-              detail: detection 
-            }));
-            
-          } catch (err) {
-            console.warn('SAPUI5 detection error:', err);
-            window.dispatchEvent(new CustomEvent('SAPUI5DetectionResult', { 
-              detail: { 
-                isSAPUI5: false, 
-                error: err.message,
-                detectionMethod: 'injected-script-error'
-              } 
-            }));
-          }
-        })();
-      `;
+      script.src = chrome.runtime.getURL('ui5-detector.js');
+      script.onload = function() {
+        this.remove();
+      };
+      script.onerror = () => {
+        this.log('Failed to load UI5 detection script, falling back to content script detection');
+        this.performDirectUI5Detection();
+      };
       
       (document.head || document.documentElement).appendChild(script);
-      script.remove();
       
-      this.log('UI5 detection script injected');
+      this.log('UI5 detection script injected via external file');
     } catch (error) {
       this.log('Failed to inject UI5 detection script:', error);
+      // Fallback to direct detection
+      this.performDirectUI5Detection();
     }
   }
 
@@ -1157,33 +1103,39 @@ class FioriTestCapture {
 
   async captureElementScreenshot(element) {
     try {
+      // Skip screenshot capture if disabled
+      if (!this.shouldCaptureScreenshots()) {
+        return null;
+      }
+
       // Capture both full page screenshot and element info
       const rect = element.getBoundingClientRect();
       const scrollX = window.pageXOffset || document.documentElement.scrollLeft;
       const scrollY = window.pageYOffset || document.documentElement.scrollTop;
       
+      const elementInfo = {
+        x: rect.left + scrollX,
+        y: rect.top + scrollY,
+        width: rect.width,
+        height: rect.height,
+        visible: this.isElementVisible(element),
+        tagName: element.tagName,
+        id: element.id,
+        className: element.className,
+        textContent: element.textContent?.slice(0, 100)
+      };
+      
       // Get element screenshot via background script
       const response = await chrome.runtime.sendMessage({
         type: 'capture-screenshot',
-        elementInfo: {
-          x: rect.left + scrollX,
-          y: rect.top + scrollY,
-          width: rect.width,
-          height: rect.height,
-          visible: this.isElementVisible(element)
-        }
+        elementInfo: elementInfo
       });
       
       if (response && response.success) {
         return {
-          dataUrl: response.screenshot,
-          timestamp: Date.now(),
-          elementBounds: {
-            x: rect.left + scrollX,
-            y: rect.top + scrollY,
-            width: rect.width,
-            height: rect.height
-          },
+          dataUrl: response.screenshot.dataUrl,
+          timestamp: response.screenshot.timestamp,
+          elementBounds: elementInfo,
           viewportSize: {
             width: window.innerWidth,
             height: window.innerHeight
@@ -1191,13 +1143,56 @@ class FioriTestCapture {
           pageSize: {
             width: document.documentElement.scrollWidth,
             height: document.documentElement.scrollHeight
-          }
+          },
+          pageInfo: response.screenshot.pageInfo,
+          captureMethod: 'chrome-tabs-api'
         };
       }
       
       return null;
     } catch (error) {
       console.warn('Failed to capture element screenshot:', error);
+      return null;
+    }
+  }
+
+  shouldCaptureScreenshots() {
+    // Check if screenshots are enabled in settings
+    try {
+      // Check for settings in storage (async, so we'll use a default)
+      return true; // Default to enabled, could be made configurable
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async capturePageScreenshot() {
+    try {
+      if (!this.shouldCaptureScreenshots()) {
+        return null;
+      }
+
+      // Request full page screenshot from background script
+      const response = await chrome.runtime.sendMessage({
+        type: 'capture-screenshot'
+      });
+      
+      if (response && response.success) {
+        return {
+          dataUrl: response.screenshot.dataUrl,
+          timestamp: response.screenshot.timestamp,
+          pageInfo: response.screenshot.pageInfo,
+          viewportSize: {
+            width: window.innerWidth,
+            height: window.innerHeight
+          },
+          captureMethod: 'chrome-tabs-api'
+        };
+      }
+      
+      return null;
+    } catch (error) {
+      console.warn('Failed to capture page screenshot:', error);
       return null;
     }
   }

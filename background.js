@@ -357,8 +357,12 @@ class FioriTestBackground {
           break;
 
         case 'export-session-markdown':
-          const markdownExport = await this.exportSessionAsMarkdown(message.sessionId || sender.tab?.id || message.tabId);
-          sendResponse({ success: true, zipData: markdownExport });
+          const exportResult = await this.exportSessionAsMarkdown(message.sessionId || sender.tab?.id || message.tabId);
+          sendResponse({ 
+            success: true, 
+            zipData: exportResult.content, 
+            filename: exportResult.filename 
+          });
           break;
 
         default:
@@ -494,6 +498,11 @@ class FioriTestBackground {
   async captureEvent(tabId, eventData) {
     const session = this.sessions.get(tabId);
     if (session && session.isRecording && !session.isPaused) {
+      // Update session semantics from UI5 context if available
+      if (eventData.ui5Context?.appSemantics) {
+        session.metadata.appSemantics = eventData.ui5Context.appSemantics;
+      }
+      
       const event = {
         eventId: this.generateUUID(),
         timestamp: Date.now(),
@@ -1015,9 +1024,15 @@ class FioriTestBackground {
       // Generate markdown content
       const markdown = this.generateSessionMarkdown(sessionData);
       
+      // Generate semantic filename
+      const filename = this.generateSemanticFilename(sessionData, 'md');
+      
       // Create a simple zip-like structure (for now, just return markdown)
       // In a full implementation, this would create an actual ZIP file with screenshots
-      return markdown;
+      return {
+        content: markdown,
+        filename: filename
+      };
     } catch (error) {
       this.logError('Failed to export session as markdown:', error);
       throw error;
@@ -1201,6 +1216,52 @@ class FioriTestBackground {
       entities: Array.from(entities.values()),
       operations
     };
+  }
+
+  generateSemanticFilename(session, extension = 'json') {
+    try {
+      // Create ISO timestamp
+      const timestamp = new Date(session.startTime).toISOString().replace(/[:.]/g, '-').split('T')[0] + 
+                       '_' + new Date(session.startTime).toISOString().replace(/[:.]/g, '-').split('T')[1].slice(0, -5);
+      
+      // Extract semantics
+      const semantics = session.metadata?.appSemantics;
+      let semanticPart = 'unknown';
+      
+      if (semantics) {
+        if (semantics.appType !== 'unknown') {
+          semanticPart = semantics.appType;
+          if (semantics.scenario) {
+            semanticPart += `-${semantics.scenario}`;
+          }
+          if (semantics.businessObject) {
+            semanticPart += `-${semantics.businessObject.toLowerCase()}`;
+          }
+        }
+      } else {
+        // Fallback: Try to infer from session name or URL
+        const sessionName = session.metadata?.sessionName || '';
+        const url = session.metadata?.applicationUrl || '';
+        
+        if (sessionName.toLowerCase().includes('manage alerts')) {
+          semanticPart = 'manage-alerts';
+        } else if (sessionName.toLowerCase().includes('launchpad') || url.includes('Shell-home')) {
+          semanticPart = 'fiori-launchpad-home';
+        } else if (url.includes('ComplianceAlert-manage')) {
+          semanticPart = 'manage-alerts';
+        } else if (url.includes('DetectionMethod-manage')) {
+          semanticPart = 'manage-detection-methods';
+        } else {
+          semanticPart = sessionName.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20) || 'unknown';
+        }
+      }
+      
+      return `fiori-session-${timestamp}-${semanticPart}.${extension}`;
+    } catch (error) {
+      this.logError('Error generating semantic filename:', error);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      return `fiori-session-${timestamp}-unknown.${extension}`;
+    }
   }
 
   generateImprovedSessionNameFromUrl(url) {
