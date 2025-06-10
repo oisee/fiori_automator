@@ -5,6 +5,7 @@ class FioriTestBackground {
   constructor() {
     this.sessions = new Map();
     this.networkRequests = new Map();
+    this.capturedResponses = new Map(); // Store captured response bodies by URL and timestamp
     this.screenshots = new Map(); // Store screenshots by ID
     this.audioRecordings = new Map(); // Store audio recordings by session ID
     this.debug = false;
@@ -171,19 +172,66 @@ class FioriTestBackground {
   }
 
   async getResponseBody(requestId) {
-    try {
-      // Chrome extensions can't directly access response bodies from webRequest API
-      // But we can use fetch API to re-request the data if it's a GET request
-      // For now, we'll indicate that response capture is attempted
-      return { 
-        captured: false, 
-        reason: 'Response body capture requires content script integration',
-        note: 'Will be implemented via fetch interception'
-      };
-    } catch (error) {
-      console.warn('Could not capture response body:', error);
-      return null;
+    const requestData = this.networkRequests.get(requestId);
+    if (!requestData) {
+      return { captured: false, reason: 'Request not found' };
     }
+
+    // Check if we have a captured response for this request
+    const responseKey = this.generateResponseKey(requestData.url, requestData.timestamp);
+    const capturedResponse = this.capturedResponses.get(responseKey);
+    
+    if (capturedResponse) {
+      this.log('Found captured response for request:', requestData.url);
+      return {
+        captured: true,
+        data: capturedResponse.responseData,
+        contentType: capturedResponse.contentType,
+        status: capturedResponse.status,
+        headers: capturedResponse.headers
+      };
+    }
+
+    // Try to find response by URL matching within a time window (±5 seconds)
+    const timeWindow = 5000;
+    for (const [key, response] of this.capturedResponses.entries()) {
+      if (response.url === requestData.url && 
+          Math.abs(response.startTime - requestData.timestamp) < timeWindow) {
+        this.log('Found captured response by time matching for:', requestData.url);
+        return {
+          captured: true,
+          data: response.responseData,
+          contentType: response.contentType,
+          status: response.status,
+          headers: response.headers
+        };
+      }
+    }
+
+    return { 
+      captured: false, 
+      reason: 'Response body not captured via content script interception'
+    };
+  }
+
+  handleCapturedResponse(responseData, tabId) {
+    const responseKey = this.generateResponseKey(responseData.url, responseData.startTime);
+    
+    // Store the captured response
+    this.capturedResponses.set(responseKey, responseData);
+    
+    // Clean up old responses (keep only last 100)
+    if (this.capturedResponses.size > 100) {
+      const keys = Array.from(this.capturedResponses.keys());
+      const toDelete = keys.slice(0, keys.length - 100);
+      toDelete.forEach(key => this.capturedResponses.delete(key));
+    }
+
+    this.log('Captured response for:', responseData.url, 'Status:', responseData.status);
+  }
+
+  generateResponseKey(url, timestamp) {
+    return `${url}:${timestamp}`;
   }
 
   isRelevantRequest(url, method, tabId) {
@@ -735,6 +783,12 @@ class FioriTestBackground {
           break;
         }
 
+        case 'response-captured': {
+          this.handleCapturedResponse(message.data, sender.tab?.id);
+          sendResponse({ success: true });
+          break;
+        }
+
         default:
           sendResponse({ success: false, error: 'Unknown message type' });
       }
@@ -1035,6 +1089,14 @@ class FioriTestBackground {
       session.metadata.sessionName = meaningfulAppName;
       session.metadata.nameUpdatedAt = Date.now();
       session.metadata.nameUpdatedReason = 'first-meaningful-event';
+      
+      // Reset stable session name to allow it to be recomputed with the new name
+      if (session.metadata.stableSessionName && 
+          (session.metadata.stableSessionName.includes('launchpad') || 
+           session.metadata.stableSessionName.includes('session'))) {
+        this.log(`Clearing cached stable name "${session.metadata.stableSessionName}" due to meaningful name update`);
+        delete session.metadata.stableSessionName;
+      }
     }
   }
 
@@ -2174,52 +2236,67 @@ class FioriTestBackground {
   }
 
   getStableSessionName(session) {
-    // Return a stable session name that doesn't change during the session
-    // This ensures all screenshots in a session have consistent filenames
+    // Return a stable session name, but allow updates when a better name becomes available
     
-    // Check if we already computed a stable name
-    if (session.metadata?.stableSessionName) {
-      return session.metadata.stableSessionName;
-    }
+    // Compute the best available name based on current session state
+    let bestName;
     
-    // Compute stable name based on current session state
-    let stableName;
-    
-    // Priority 1: Use the final/most specific app name if available
+    // Priority 1: Use the current/most specific app name if available
     const currentName = session.metadata?.sessionName || '';
     if (currentName && 
         !currentName.includes('Launchpad') && 
         !currentName.startsWith('Session ') &&
         !currentName.includes('New Recording')) {
-      stableName = this.cleanNameForFilename(currentName);
+      bestName = this.cleanNameForFilename(currentName);
     }
     // Priority 2: Use the original session name if it was meaningful
     else if (session.metadata?.originalSessionName && 
              !session.metadata.originalSessionName.includes('Launchpad') &&
              !session.metadata.originalSessionName.startsWith('Session ')) {
-      stableName = this.cleanNameForFilename(session.metadata.originalSessionName);
+      bestName = this.cleanNameForFilename(session.metadata.originalSessionName);
     }
     // Priority 3: Use URL pattern detection
     else {
       const url = session.metadata?.applicationUrl || '';
       if (url.includes('DetectionMethod-manage')) {
-        stableName = 'manage-detection-methods';
+        bestName = 'manage-detection-methods';
       } else if (url.includes('Shell-home')) {
-        stableName = 'launchpad-home';
+        bestName = 'launchpad-home';
       } else if (url.includes('ComplianceAlert-manage')) {
-        stableName = 'manage-alerts';
+        bestName = 'manage-alerts';
       } else {
         // Fallback to session naming logic
-        stableName = this.extractConciseSessionName(session);
+        bestName = this.extractConciseSessionName(session);
       }
     }
     
-    // Cache the stable name to ensure consistency
-    if (!session.metadata) session.metadata = {};
-    session.metadata.stableSessionName = stableName;
+    // Check if we have a cached stable name
+    const cachedName = session.metadata?.stableSessionName;
     
-    this.log(`Computed stable session name: "${stableName}" for session ${session.sessionId}`);
-    return stableName;
+    // Update stable name if:
+    // 1. No cached name exists, OR
+    // 2. Cached name is generic (launchpad, session) but we now have a better specific name
+    const shouldUpdate = !cachedName || 
+      ((cachedName.includes('launchpad') || cachedName.includes('session')) && 
+       bestName && 
+       !bestName.includes('launchpad') && 
+       !bestName.includes('session'));
+    
+    if (shouldUpdate) {
+      if (!session.metadata) session.metadata = {};
+      session.metadata.stableSessionName = bestName;
+      
+      if (cachedName && cachedName !== bestName) {
+        this.log(`Updated stable session name: "${cachedName}" → "${bestName}" for session ${session.sessionId}`);
+      } else {
+        this.log(`Set stable session name: "${bestName}" for session ${session.sessionId}`);
+      }
+      
+      return bestName;
+    }
+    
+    // Return cached name if no update needed
+    return cachedName || bestName;
   }
 
   generateElementSemantics(elementInfo) {

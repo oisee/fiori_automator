@@ -20,6 +20,7 @@ if (!window.FioriTestCapture) {
     this.setupDebugMode();
     this.setupEventListeners();
     this.setupMessageHandling();
+    this.setupResponseCapture();
     this.detectUI5Context();
     this.injectHelperScript();
   }
@@ -116,6 +117,133 @@ if (!window.FioriTestCapture) {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       this.handleMessage(message, sender, sendResponse);
       return true;
+    });
+  }
+
+  setupResponseCapture() {
+    // Store original fetch and XMLHttpRequest for restoration
+    this.originalFetch = window.fetch;
+    this.originalXMLHttpRequest = window.XMLHttpRequest;
+    this.interceptedResponses = new Map();
+
+    // Intercept fetch API
+    window.fetch = async (...args) => {
+      const startTime = Date.now();
+      const [resource, config] = args;
+      const url = typeof resource === 'string' ? resource : resource.url;
+      const method = config?.method || 'GET';
+
+      try {
+        const response = await this.originalFetch.apply(window, args);
+        
+        // Clone response to read body without consuming it
+        const responseClone = response.clone();
+        
+        // Capture response body for relevant requests
+        if (this.isRelevantForCapture(url, method)) {
+          this.captureResponseBody(url, method, responseClone, startTime);
+        }
+        
+        return response;
+      } catch (error) {
+        this.log('Fetch error for', url, ':', error);
+        throw error;
+      }
+    };
+
+    // Intercept XMLHttpRequest
+    const originalOpen = this.originalXMLHttpRequest.prototype.open;
+    const originalSend = this.originalXMLHttpRequest.prototype.send;
+    
+    this.originalXMLHttpRequest.prototype.open = function(method, url, ...args) {
+      this._fioriRequestData = { method, url, startTime: Date.now() };
+      return originalOpen.call(this, method, url, ...args);
+    };
+    
+    this.originalXMLHttpRequest.prototype.send = function(body) {
+      const self = window.fioriTestCaptureInstance; // Reference to content script instance
+      
+      this.addEventListener('loadend', function() {
+        if (this._fioriRequestData && self?.isRelevantForCapture(this._fioriRequestData.url, this._fioriRequestData.method)) {
+          const responseData = {
+            url: this._fioriRequestData.url,
+            method: this._fioriRequestData.method,
+            status: this.status,
+            statusText: this.statusText,
+            responseText: this.responseText,
+            responseHeaders: this.getAllResponseHeaders(),
+            startTime: this._fioriRequestData.startTime,
+            endTime: Date.now()
+          };
+          
+          self.sendCapturedResponse(responseData);
+        }
+      });
+      
+      return originalSend.call(this, body);
+    };
+
+    this.log('Response capture interceptors installed');
+  }
+
+  async captureResponseBody(url, method, response, startTime) {
+    try {
+      const contentType = response.headers.get('content-type') || '';
+      let responseData = null;
+
+      // Only capture text-based responses to avoid large binary data
+      if (contentType.includes('application/json') ||
+          contentType.includes('text/') ||
+          contentType.includes('application/xml') ||
+          contentType.includes('application/atom+xml')) {
+        
+        responseData = await response.text();
+        
+        // Limit response size to 50KB to avoid memory issues
+        if (responseData.length > 50000) {
+          responseData = responseData.substring(0, 50000) + '...[truncated]';
+        }
+      }
+
+      const capturedResponse = {
+        url,
+        method,
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
+        responseData,
+        contentType,
+        startTime,
+        endTime: Date.now(),
+        captured: true
+      };
+
+      this.sendCapturedResponse(capturedResponse);
+    } catch (error) {
+      this.log('Error capturing response body:', error);
+    }
+  }
+
+  isRelevantForCapture(url, method) {
+    // Only capture responses for OData requests and other API calls
+    if (url.includes('/$metadata') || 
+        url.includes('/$batch') ||
+        url.includes('/sap/opu/odata') ||
+        url.includes('/sap/bc/rest/') ||
+        url.includes('api/') ||
+        (method !== 'GET' && !url.includes('.js') && !url.includes('.css'))) {
+      return true;
+    }
+    return false;
+  }
+
+  sendCapturedResponse(responseData) {
+    // Send captured response to background script
+    chrome.runtime.sendMessage({
+      type: 'response-captured',
+      data: responseData
+    }).catch(error => {
+      this.log('Error sending captured response:', error);
     });
   }
 
