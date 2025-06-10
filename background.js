@@ -11,6 +11,7 @@ class FioriTestBackground {
     this.lastScreenshotTime = 0; // Track last screenshot time for rate limiting
     this.screenshotQueue = []; // Queue for pending screenshots
     this.processingScreenshots = false;
+    this.eventVerbosity = 'default'; // 'summary', 'default', 'verbose'
     this.init();
   }
 
@@ -542,7 +543,8 @@ class FioriTestBackground {
         sessionName: improvedSessionName || sessionData.sessionName,
         originalSessionName: sessionData.sessionName,
         userAgent: navigator.userAgent,
-        audioRecording: sessionData.recordAudio || false
+        audioRecording: sessionData.recordAudio || false,
+        eventVerbosity: sessionData.eventVerbosity || 'default'
       },
       events: [],
       networkRequests: [],
@@ -553,6 +555,10 @@ class FioriTestBackground {
     };
 
     this.sessions.set(tabId, session);
+    
+    // Set verbosity level for this recording session
+    this.eventVerbosity = sessionData.eventVerbosity || 'default';
+    this.log(`Recording started with verbosity level: ${this.eventVerbosity}`);
     
     // Start audio recording if enabled
     if (sessionData.recordAudio) {
@@ -709,8 +715,13 @@ class FioriTestBackground {
       // Check if this is the first meaningful event that should update session name
       await this.updateSessionNameIfNeeded(session, event, eventData);
 
-      // Apply input event coalescing
-      this.addEventWithCoalescing(session, event);
+      // Apply verbosity filtering and input event coalescing
+      if (this.shouldIncludeEventByVerbosity(event, session)) {
+        this.addEventWithCoalescing(session, event);
+      } else {
+        this.log(`Event filtered out by verbosity (${this.eventVerbosity}):`, event.type, event.element?.tagName);
+        return; // Skip further processing for filtered events
+      }
       
       // Capture screenshot after event is processed and has proper ID
       if (this.shouldCaptureScreenshotForEvent(event)) {
@@ -894,6 +905,109 @@ class FioriTestBackground {
       // Cannot coalesce, add as new event
       session.events.push(newEvent);
     }
+  }
+
+  shouldIncludeEventByVerbosity(event, session) {
+    // Always include navigation and major state changes regardless of verbosity
+    const criticalEventTypes = ['navigation', 'page_load', 'form_submit', 'click'];
+    
+    if (criticalEventTypes.includes(event.type)) {
+      return true;
+    }
+
+    const verbosityLevel = this.eventVerbosity;
+    
+    switch (verbosityLevel) {
+      case 'summary':
+        return this.isSummaryLevelEvent(event, session);
+      
+      case 'default':
+        return this.isDefaultLevelEvent(event, session);
+      
+      case 'verbose':
+        return true; // Include everything
+      
+      default:
+        return this.isDefaultLevelEvent(event, session);
+    }
+  }
+
+  isSummaryLevelEvent(event, session) {
+    // Summary mode: Only major navigation and meaningful actions
+    const summaryTypes = ['navigation', 'page_load', 'form_submit'];
+    
+    if (summaryTypes.includes(event.type)) {
+      return true;
+    }
+    
+    // Include clicks on buttons and links (meaningful UI interactions)
+    if (event.type === 'click') {
+      const tagName = event.element?.tagName?.toLowerCase();
+      const meaningfulElements = ['button', 'a', 'input'];
+      return meaningfulElements.includes(tagName);
+    }
+    
+    // Include inputs with substantial content changes (> 5 characters)
+    if (event.type === 'input') {
+      const value = event.value || '';
+      return value.length > 5;
+    }
+    
+    return false;
+  }
+
+  isDefaultLevelEvent(event, session) {
+    // Default mode: Major actions + meaningful inputs, filter out noise
+    const defaultTypes = ['navigation', 'page_load', 'form_submit', 'click', 'editing_start', 'editing_end'];
+    
+    if (defaultTypes.includes(event.type)) {
+      return true;
+    }
+    
+    // Include input events but filter out trivial ones
+    if (event.type === 'input') {
+      const value = event.value || '';
+      
+      // Skip empty inputs
+      if (value.trim().length === 0) {
+        return false;
+      }
+      
+      // Skip very short inputs (< 2 characters) unless they're in important fields
+      if (value.length < 2) {
+        const isImportantField = this.isImportantField(event.element);
+        return isImportantField;
+      }
+      
+      return true;
+    }
+    
+    // Include keyboard shortcuts and important key events
+    if (event.type === 'keydown') {
+      const key = event.key?.toLowerCase();
+      const shortcuts = ['enter', 'escape', 'tab', 'f1', 'f2', 'f3', 'f4', 'f5'];
+      const hasModifiers = event.modifiers?.ctrlKey || event.modifiers?.altKey || event.modifiers?.metaKey;
+      
+      return shortcuts.includes(key) || hasModifiers;
+    }
+    
+    return false;
+  }
+
+  isImportantField(element) {
+    if (!element) return false;
+    
+    const importantTypes = ['email', 'password', 'search', 'tel', 'url'];
+    const importantNames = ['username', 'password', 'email', 'search', 'query'];
+    const importantIds = ['username', 'password', 'email', 'search', 'query', 'login'];
+    
+    const type = element.type?.toLowerCase() || '';
+    const name = element.name?.toLowerCase() || '';
+    const id = element.id?.toLowerCase() || '';
+    
+    return importantTypes.includes(type) || 
+           importantNames.some(n => name.includes(n)) ||
+           importantIds.some(n => id.includes(n));
   }
 
   canCoalesceInputEvents(lastEvent, newEvent, timeThreshold) {
@@ -1547,7 +1661,7 @@ class FioriTestBackground {
   }
 
   generateScreenshotId(eventType = 'manual', eventId = null, session = null, elementInfo = null) {
-    // Generate clean screenshot filename: fs-<timestamp>-<session-name>-<event-id>-<event-type>
+    // Generate clean screenshot filename: fs-<timestamp>-<stable-session-name>-<event-id>-<event-type>
     
     // Get session timestamp and name for consistency with session files
     const date = new Date(session?.startTime || Date.now());
@@ -1555,8 +1669,8 @@ class FioriTestBackground {
     const timeStr = date.toISOString().split('T')[1].slice(0, 5).replace(':', ''); // HHMM
     const timestamp = `${dateStr}-${timeStr}`;
     
-    // Get concise session name
-    const sessionNameShort = session ? this.extractConciseSessionName(session) : 'session';
+    // Use stable session name to ensure all screenshots in a session have consistent filenames
+    const sessionNameShort = session ? this.getStableSessionName(session) : 'session';
     
     // Format event ID with leading zeros (0001, 0002, etc.)
     // If no eventId provided, generate next sequential number from session
@@ -1576,6 +1690,55 @@ class FioriTestBackground {
     const cleanEventType = (eventType || 'event').toLowerCase().replace(/[^a-z0-9]/g, '');
     
     return `fs-${timestamp}-${sessionNameShort}-${formattedEventId}-${cleanEventType}`;
+  }
+
+  getStableSessionName(session) {
+    // Return a stable session name that doesn't change during the session
+    // This ensures all screenshots in a session have consistent filenames
+    
+    // Check if we already computed a stable name
+    if (session.metadata?.stableSessionName) {
+      return session.metadata.stableSessionName;
+    }
+    
+    // Compute stable name based on current session state
+    let stableName;
+    
+    // Priority 1: Use the final/most specific app name if available
+    const currentName = session.metadata?.sessionName || '';
+    if (currentName && 
+        !currentName.includes('Launchpad') && 
+        !currentName.startsWith('Session ') &&
+        !currentName.includes('New Recording')) {
+      stableName = this.cleanNameForFilename(currentName);
+    }
+    // Priority 2: Use the original session name if it was meaningful
+    else if (session.metadata?.originalSessionName && 
+             !session.metadata.originalSessionName.includes('Launchpad') &&
+             !session.metadata.originalSessionName.startsWith('Session ')) {
+      stableName = this.cleanNameForFilename(session.metadata.originalSessionName);
+    }
+    // Priority 3: Use URL pattern detection
+    else {
+      const url = session.metadata?.applicationUrl || '';
+      if (url.includes('DetectionMethod-manage')) {
+        stableName = 'manage-detection-methods';
+      } else if (url.includes('Shell-home')) {
+        stableName = 'launchpad-home';
+      } else if (url.includes('ComplianceAlert-manage')) {
+        stableName = 'manage-alerts';
+      } else {
+        // Fallback to session naming logic
+        stableName = this.extractConciseSessionName(session);
+      }
+    }
+    
+    // Cache the stable name to ensure consistency
+    if (!session.metadata) session.metadata = {};
+    session.metadata.stableSessionName = stableName;
+    
+    this.log(`Computed stable session name: "${stableName}" for session ${session.sessionId}`);
+    return stableName;
   }
 
   generateElementSemantics(elementInfo) {
@@ -2738,8 +2901,8 @@ class FioriTestBackground {
       const timeStr = date.toISOString().split('T')[1].slice(0, 5).replace(':', ''); // HHMM
       const timestamp = `${dateStr}-${timeStr}`;
       
-      // Extract concise session name (max 2 words)
-      const sessionNameShort = this.extractConciseSessionName(session);
+      // Use stable session name for consistency with screenshots
+      const sessionNameShort = this.getStableSessionName(session);
       
       return `fs-${timestamp}-${sessionNameShort}.${extension}`;
     } catch (error) {

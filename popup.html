@@ -88,6 +88,18 @@
                             Record voice audio
                         </label>
                     </div>
+                    
+                    <div class="verbosity-config">
+                        <label for="eventVerbosity" class="config-label">Event Detail Level:</label>
+                        <select id="eventVerbosity" class="select">
+                            <option value="summary">Summary (Major actions only)</option>
+                            <option value="default" selected>Default (Recommended)</option>
+                            <option value="verbose">Verbose (All events)</option>
+                        </select>
+                        <div class="help-text">
+                            Controls how many events are captured. Summary mode captures ~5 events, Default ~10, Verbose all events (~20+).
+                        </div>
+                    </div>
                 </div>
             </section>
 

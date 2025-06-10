@@ -18,6 +18,14 @@ mkdir -p build
 # Clean previous builds
 rm -rf build/*.zip
 
+# Step 1: Regenerate all icons from source
+echo "🎨 Regenerating icons from source..."
+if [ -f "icons/icon_full.png" ]; then
+  ./create-icons.sh
+else
+  echo "⚠️  Warning: icons/icon_full.png not found, skipping icon regeneration"
+fi
+
 # Extension files to copy (exclude build artifacts and dev files)
 EXTENSION_FILES=(
   "manifest.json"

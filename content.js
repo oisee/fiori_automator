@@ -582,17 +582,40 @@ if (!window.FioriTestCapture) {
       const detection = event.detail;
       this.log('Received UI5 detection result from injected script:', detection);
       
-      // Merge with existing context or replace if better
-      if (detection.isSAPUI5 || (!this.ui5Context?.isUI5App && detection.confidence > 0.5)) {
+      // Always update UI5 context with injected script results (they're more comprehensive)
+      if (detection && (detection.isSAPUI5 || detection.confidence > 0.3)) {
         this.ui5Context = {
-          ...this.ui5Context,
-          ...detection,
-          detectionMethod: 'injected-script-enhanced'
+          isUI5App: detection.isSAPUI5,
+          isFiori: detection.isSAPUI5 && this.detectFioriPatterns(),
+          version: detection.version,
+          theme: detection.theme,
+          locale: detection.locale,
+          libraries: detection.libraries || [],
+          components: detection.components || [],
+          views: detection.views || [],
+          confidence: detection.confidence,
+          detectionMethods: detection.detectionMethods || [],
+          detectionMethod: 'injected-script-enhanced',
+          buildInfo: detection.buildInfo,
+          bootPath: detection.bootPath,
+          resourceRoots: detection.resourceRoots,
+          loadedModules: detection.loadedModules || [],
+          errors: detection.errors || []
         };
         
-        this.log('Updated UI5 context from injected script:', this.ui5Context);
+        this.log('✅ Updated UI5 context from injected script:', this.ui5Context);
+      } else {
+        this.log('⚠️ Injected script detection failed or low confidence:', detection);
       }
     });
+    
+    // Add a timeout fallback in case injected script fails
+    setTimeout(() => {
+      if (!this.ui5Context || !this.ui5Context.isUI5App) {
+        this.log('⏰ UI5 detection timeout - attempting final fallback detection');
+        this.performFinalFallbackDetection();
+      }
+    }, 2000);
   }
 
   detectFioriPatterns() {
@@ -619,15 +642,79 @@ if (!window.FioriTestCapture) {
     return fioriIndicators.some(Boolean);
   }
 
+  performFinalFallbackDetection() {
+    // Final attempt at UI5 detection using all available methods
+    const finalHeuristics = {
+      hasUI5Namespace: typeof window.sap !== 'undefined' && typeof window.sap.ui !== 'undefined',
+      hasJQuerySap: typeof window.jQuery !== 'undefined' && typeof window.jQuery.sap !== 'undefined',
+      hasUI5Bootstrap: !!document.querySelector('#sap-ui-bootstrap'),
+      hasUI5Scripts: !!document.querySelector('script[src*="sap-ui"], script[src*="ui5"]'),
+      hasSapClasses: document.querySelectorAll('[class*="sap"]').length > 10,
+      hasFioriShell: !!document.querySelector('.sapUshellShell, .sapUshellContainer'),
+      hasFioriControls: document.querySelectorAll('[class*="sapM"], [class*="sapUi"]').length > 5,
+      hasApplicationId: !!document.querySelector('[id*="application-"][id*="component"]'),
+      isFioriURL: /fiori|ui5|sap/i.test(window.location.href)
+    };
+
+    const positiveHeuristics = Object.values(finalHeuristics).filter(Boolean).length;
+    const confidence = positiveHeuristics / Object.keys(finalHeuristics).length;
+
+    if (confidence > 0.4 || finalHeuristics.hasUI5Namespace) {
+      this.ui5Context = {
+        isUI5App: true,
+        isFiori: finalHeuristics.hasFioriShell || finalHeuristics.hasApplicationId,
+        confidence: confidence,
+        detectionMethod: 'final-fallback',
+        heuristics: finalHeuristics,
+        version: window.sap?.ui?.version || 'unknown',
+        theme: 'unknown',
+        locale: 'unknown',
+        libraries: [],
+        components: [],
+        views: [],
+        detectionMethods: ['final-fallback'],
+        errors: []
+      };
+      
+      this.log('🔄 Final fallback UI5 detection successful:', this.ui5Context);
+    } else {
+      this.ui5Context = {
+        isUI5App: false,
+        isFiori: false,
+        confidence: confidence,
+        detectionMethod: 'final-fallback-negative',
+        heuristics: finalHeuristics,
+        errors: ['No sufficient UI5 indicators found']
+      };
+      
+      this.log('❌ Final fallback UI5 detection: Not a UI5 app:', this.ui5Context);
+    }
+  }
+
   getUI5ElementContext(element) {
+    // Always return basic UI5 context information
+    const baseContext = {
+      globalUI5Context: this.ui5Context || { isUI5App: false, detectionMethod: 'not-detected' },
+      timestamp: Date.now()
+    };
+    
+    // Return early if no UI5 app detected
     if (!this.ui5Context?.isUI5App || !window.sap?.ui) {
-      return null;
+      return {
+        ...baseContext,
+        elementUI5Info: null,
+        reason: 'no-ui5-detected'
+      };
     }
 
     try {
       const core = window.sap.ui.getCore();
       if (!core) {
-        return null;
+        return {
+          ...baseContext,
+          elementUI5Info: null,
+          reason: 'no-ui5-core'
+        };
       }
 
       // Method 1: Direct control lookup by ID
@@ -635,11 +722,14 @@ if (!window.FioriTestCapture) {
         const control = core.byId(element.id);
         if (control) {
           return {
-            controlType: control.getMetadata().getName(),
-            controlId: control.getId(),
-            properties: this.getControlProperties(control),
-            bindingInfo: this.getBindingInfo(control),
-            method: 'direct-id'
+            ...baseContext,
+            elementUI5Info: {
+              controlType: control.getMetadata().getName(),
+              controlId: control.getId(),
+              properties: this.getControlProperties(control),
+              bindingInfo: this.getBindingInfo(control),
+              method: 'direct-id'
+            }
           };
         }
       }
@@ -652,11 +742,14 @@ if (!window.FioriTestCapture) {
           if (control && control.length > 0) {
             const ui5Control = control[0];
             return {
-              controlType: ui5Control.getMetadata().getName(),
-              controlId: ui5Control.getId(),
-              properties: this.getControlProperties(ui5Control),
-              bindingInfo: this.getBindingInfo(ui5Control),
-              method: 'jquery-plugin'
+              ...baseContext,
+              elementUI5Info: {
+                controlType: ui5Control.getMetadata().getName(),
+                controlId: ui5Control.getId(),
+                properties: this.getControlProperties(ui5Control),
+                bindingInfo: this.getBindingInfo(ui5Control),
+                method: 'jquery-plugin'
+              }
             };
           }
         } catch (e) {
@@ -673,12 +766,15 @@ if (!window.FioriTestCapture) {
           const control = core.byId(controlId);
           if (control) {
             return {
-              controlType: control.getMetadata().getName(),
-              controlId: control.getId(),
-              properties: this.getControlProperties(control),
-              bindingInfo: this.getBindingInfo(control),
-              method: 'data-attribute',
-              elementRole: currentElement === element ? 'direct' : 'descendant'
+              ...baseContext,
+              elementUI5Info: {
+                controlType: control.getMetadata().getName(),
+                controlId: control.getId(),
+                properties: this.getControlProperties(control),
+                bindingInfo: this.getBindingInfo(control),
+                method: 'data-attribute',
+                elementRole: currentElement === element ? 'direct' : 'descendant'
+              }
             };
           }
         }
@@ -693,12 +789,15 @@ if (!window.FioriTestCapture) {
               const control = core.byId(currentElement.id);
               if (control) {
                 return {
-                  controlType: control.getMetadata().getName(),
-                  controlId: control.getId(),
-                  properties: this.getControlProperties(control),
-                  bindingInfo: this.getBindingInfo(control),
-                  method: 'ui5-marker',
-                  elementRole: currentElement === element ? 'direct' : 'ancestor'
+                  ...baseContext,
+                  elementUI5Info: {
+                    controlType: control.getMetadata().getName(),
+                    controlId: control.getId(),
+                    properties: this.getControlProperties(control),
+                    bindingInfo: this.getBindingInfo(control),
+                    method: 'ui5-marker',
+                    elementRole: currentElement === element ? 'direct' : 'ancestor'
+                  }
                 };
               }
             }
@@ -717,24 +816,30 @@ if (!window.FioriTestCapture) {
           if (controls.length > 0) {
             const closestControl = controls[0]; // Take the first (closest) control
             return {
-              controlType: closestControl.getMetadata().getName(),
-              controlId: closestControl.getId(),
-              properties: this.getControlProperties(closestControl),
-              bindingInfo: this.getBindingInfo(closestControl),
-              method: 'ui-area-traversal',
-              elementRole: 'within-control',
-              uiAreaId: area.getId()
+              ...baseContext,
+              elementUI5Info: {
+                controlType: closestControl.getMetadata().getName(),
+                controlId: closestControl.getId(),
+                properties: this.getControlProperties(closestControl),
+                bindingInfo: this.getBindingInfo(closestControl),
+                method: 'ui-area-traversal',
+                elementRole: 'within-control',
+                uiAreaId: area.getId()
+              }
             };
           }
 
           // If no specific control found, return UI area info
           return {
-            controlType: 'sap.ui.core.UIArea',
-            controlId: area.getId(),
-            properties: {},
-            bindingInfo: {},
-            method: 'ui-area',
-            elementRole: 'within-area'
+            ...baseContext,
+            elementUI5Info: {
+              controlType: 'sap.ui.core.UIArea',
+              controlId: area.getId(),
+              properties: {},
+              bindingInfo: {},
+              method: 'ui-area',
+              elementRole: 'within-area'
+            }
           };
         }
       }
@@ -742,14 +847,28 @@ if (!window.FioriTestCapture) {
       // Method 5: Check if element is within any known UI5 component
       const componentInfo = this.findUI5Component(element);
       if (componentInfo) {
-        return componentInfo;
+        return {
+          ...baseContext,
+          elementUI5Info: componentInfo
+        };
       }
 
     } catch (error) {
       console.warn('Error getting UI5 context:', error);
+      return {
+        ...baseContext,
+        elementUI5Info: null,
+        reason: 'ui5-context-error',
+        error: error.message
+      };
     }
 
-    return null;
+    // No UI5 control found but UI5 app detected
+    return {
+      ...baseContext,
+      elementUI5Info: null,
+      reason: 'no-ui5-control-found'
+    };
   }
 
   getControlProperties(control) {

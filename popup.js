@@ -142,6 +142,7 @@ class FioriTestPopup {
         autoCorrelation: document.getElementById('autoCorrelation').checked,
         filterJSRequests: document.getElementById('filterJSRequests').checked,
         recordAudio: document.getElementById('recordAudio').checked,
+        eventVerbosity: document.getElementById('eventVerbosity').value,
         applicationUrl: this.currentTab.url,
         timestamp: Date.now()
       };
