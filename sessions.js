@@ -345,6 +345,29 @@ class SessionsManager {
     
     if (event.correlatedRequests && event.correlatedRequests.length > 0) {
       details.push(`Correlated OData: ${event.correlatedRequests.length} request(s)`);
+      
+      // Show enhanced OData request details
+      event.correlatedRequests.forEach((req, index) => {
+        if (req.odataAnalysis) {
+          const analysis = req.odataAnalysis;
+          details.push(`   Request ${index + 1}: ${analysis.requestType}`);
+          
+          if (analysis.entitySet) {
+            details.push(`     Entity: ${analysis.entitySet}`);
+          }
+          
+          if (analysis.queryParams) {
+            const params = Object.keys(analysis.queryParams);
+            if (params.length > 0) {
+              details.push(`     Query: ${params.join(', ')}`);
+            }
+          }
+          
+          if (analysis.isBatch && req.batchOperations) {
+            details.push(`     Batch: ${req.batchOperations.length} operations`);
+          }
+        }
+      });
     }
     
     return details.join('\n');

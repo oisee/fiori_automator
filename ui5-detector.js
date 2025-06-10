@@ -155,7 +155,17 @@
         }
       }
       
-      // Method 5: CSS and DOM indicators
+      // Method 5: Extract UI5 Models (especially AppInfo model)
+      if (result.isSAPUI5 && window.sap.ui.getCore) {
+        try {
+          const core = window.sap.ui.getCore();
+          result.models = this.extractUI5Models(core);
+        } catch (modelError) {
+          result.errors.push(`Model extraction: ${modelError.message}`);
+        }
+      }
+      
+      // Method 6: CSS and DOM indicators
       const domIndicators = {
         sapClasses: document.querySelectorAll('[class*="sap"]').length,
         fioriShell: !!document.querySelector('.sapUshellShell'),
@@ -180,7 +190,7 @@
         }
       }
       
-      // Method 6: URL pattern analysis
+      // Method 7: URL pattern analysis
       const url = window.location.href;
       const urlPatterns = [
         /\/sap\/bc\/ui5_ui5\//,
@@ -212,6 +222,132 @@
     }
     
     return result;
+  }
+  
+  // Extract UI5 Models data
+  function extractUI5Models(core) {
+    const models = [];
+    
+    try {
+      // Method 1: Try to get models from current view/component
+      const currentApp = this.getCurrentApplication(core);
+      if (currentApp && currentApp.getModel) {
+        // Get all named models
+        const modelNames = ['', 'AppInfo', 'SysInfo', 'UserEnvInfo', 'i18n', 'device'];
+        
+        modelNames.forEach(modelName => {
+          try {
+            const model = currentApp.getModel(modelName);
+            if (model) {
+              const modelInfo = {
+                name: modelName || 'default',
+                type: model.getMetadata().getName(),
+                mode: model.getDefaultBindingMode ? model.getDefaultBindingMode() : 'Unknown'
+              };
+              
+              // Extract data for JSON models
+              if (model.getData && typeof model.getData === 'function') {
+                try {
+                  modelInfo.data = model.getData();
+                } catch (e) {
+                  // Some models don't support getData
+                }
+              }
+              
+              models.push(modelInfo);
+            }
+          } catch (e) {
+            // Model not found or error accessing it
+          }
+        });
+      }
+      
+      // Method 2: Try to find models in the shell component
+      if (window.sap && window.sap.ushell && window.sap.ushell.Container) {
+        try {
+          const shellComponent = window.sap.ushell.Container.getRenderer('fiori2').getShellComponent();
+          if (shellComponent && shellComponent.getModel) {
+            const appInfoModel = shellComponent.getModel('AppInfo');
+            if (appInfoModel && appInfoModel.getData) {
+              models.push({
+                name: 'AppInfo',
+                type: 'sap.ui.model.json.JSONModel',
+                mode: 'TwoWay',
+                data: appInfoModel.getData(),
+                source: 'shell-component'
+              });
+            }
+          }
+        } catch (e) {
+          // Shell component method failed
+        }
+      }
+      
+      // Method 3: Look for models in UI areas
+      const uiAreas = core.getUIAreas();
+      for (let area of uiAreas) {
+        try {
+          const content = area.getContent();
+          if (content && content.length > 0) {
+            for (let item of content) {
+              if (item.getModel) {
+                // Check for AppInfo model specifically
+                const appInfoModel = item.getModel('AppInfo');
+                if (appInfoModel && appInfoModel.getData && !models.find(m => m.name === 'AppInfo')) {
+                  models.push({
+                    name: 'AppInfo',
+                    type: appInfoModel.getMetadata().getName(),
+                    data: appInfoModel.getData(),
+                    source: 'ui-area-content'
+                  });
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // Error processing UI area
+        }
+      }
+      
+    } catch (error) {
+      console.warn('Error extracting UI5 models:', error);
+    }
+    
+    return models;
+  }
+  
+  // Get current application component
+  function getCurrentApplication(core) {
+    try {
+      // Method 1: Get from current component
+      const currentComponent = core.getCurrentComponent ? core.getCurrentComponent() : null;
+      if (currentComponent) return currentComponent;
+      
+      // Method 2: Get from shell container
+      if (window.sap.ushell && window.sap.ushell.Container) {
+        const currentApp = window.sap.ushell.Container.getService("AppLifeCycle").getCurrentApplication();
+        if (currentApp && currentApp.componentInstance) {
+          return currentApp.componentInstance;
+        }
+      }
+      
+      // Method 3: Find application component in UI areas
+      const uiAreas = core.getUIAreas();
+      for (let area of uiAreas) {
+        const content = area.getContent();
+        if (content && content.length > 0) {
+          for (let item of content) {
+            if (item.getMetadata && item.getMetadata().getName().includes('Component')) {
+              return item;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error getting current application:', e);
+    }
+    
+    return null;
   }
   
   // Perform detection

@@ -95,21 +95,34 @@ class FioriTestBackground {
 
   handleBeforeRequest(details) {
     if (this.isRelevantRequest(details.url, details.method, details.tabId)) {
+      const requestBody = this.extractRequestBody(details.requestBody);
       const requestData = {
         requestId: this.generateUUID(),
         tabId: details.tabId,
         url: details.url,
         method: details.method,
         timestamp: Date.now(),
-        requestBody: this.extractRequestBody(details.requestBody),
+        requestBody: requestBody,
         type: this.classifyRequestType(details.url, details.method)
       };
+
+      // Enhanced OData analysis
+      if (this.isODataRequest(details.url)) {
+        requestData.odataAnalysis = this.analyzeODataRequest(details.url, details.method, requestBody);
+        
+        // Handle $batch requests - unwrap and analyze individual operations
+        if (requestData.odataAnalysis.isBatch) {
+          requestData.batchOperations = this.unwrapBatchRequest(requestBody);
+          this.log('$batch request unwrapped:', requestData.batchOperations);
+        }
+      }
 
       this.log('Request intercepted:', {
         url: details.url,
         method: details.method,
         type: requestData.type,
-        requestId: requestData.requestId
+        requestId: requestData.requestId,
+        odataType: requestData.odataAnalysis?.requestType || 'non-odata'
       });
 
       this.networkRequests.set(details.requestId, requestData);
@@ -288,6 +301,10 @@ class FioriTestBackground {
     if (this.isODataRequest(url)) {
       if (url.includes('$batch')) return 'odata-batch';
       if (url.includes('$metadata')) return 'odata-metadata';
+      if (url.includes('$count')) return 'odata-count';
+      if (url.includes('$filter')) return 'odata-filter';
+      if (url.includes('$search')) return 'odata-search';
+      if (url.includes('$expand')) return 'odata-expand';
       return 'odata';
     }
     
@@ -307,6 +324,205 @@ class FioriTestBackground {
     }
     
     return `${method.toLowerCase()}`;
+  }
+
+  analyzeODataRequest(url, method, requestBody) {
+    const analysis = {
+      isBatch: url.includes('$batch'),
+      isMetadata: url.includes('$metadata'),
+      isCount: url.includes('$count'),
+      requestType: 'unknown',
+      operations: [],
+      queryParams: {},
+      entitySet: null,
+      serviceRoot: null
+    };
+
+    // Extract service root
+    analysis.serviceRoot = this.extractODataServiceRoot(url);
+
+    // Parse URL parameters
+    try {
+      const urlObj = new URL(url);
+      const params = urlObj.searchParams;
+      
+      // Extract common OData query parameters
+      const odataParams = [
+        '$filter', '$search', '$select', '$expand', '$orderby', 
+        '$top', '$skip', '$format', '$inlinecount', '$skiptoken'
+      ];
+      
+      odataParams.forEach(param => {
+        if (params.has(param)) {
+          analysis.queryParams[param] = params.get(param);
+        }
+      });
+      
+      // Extract entity set from URL path
+      if (analysis.serviceRoot) {
+        const serviceRootPath = new URL(analysis.serviceRoot).pathname;
+        const fullPath = urlObj.pathname;
+        const pathAfterService = fullPath.substring(serviceRootPath.length);
+        const pathParts = pathAfterService.split('/').filter(p => p && !p.startsWith('$'));
+        if (pathParts.length > 0) {
+          analysis.entitySet = pathParts[0].split('(')[0]; // Remove key predicates
+        }
+      }
+      
+    } catch (e) {
+      this.log('Error parsing OData URL:', e);
+    }
+
+    // Determine request type based on URL and method
+    analysis.requestType = this.determineODataRequestType(url, method, analysis);
+
+    return analysis;
+  }
+
+  determineODataRequestType(url, method, analysis) {
+    // Handle special OData endpoints
+    if (analysis.isMetadata) return 'metadata';
+    if (analysis.isBatch) return 'batch';
+    if (analysis.isCount) return 'count';
+
+    // Check for system query options to determine intent
+    const queryParams = analysis.queryParams;
+    
+    if (queryParams['$filter']) {
+      return 'filter-query';
+    }
+    
+    if (queryParams['$search']) {
+      return 'search-query';
+    }
+    
+    if (queryParams['$expand']) {
+      return 'expand-query';
+    }
+    
+    if (queryParams['$top'] || queryParams['$skip']) {
+      return 'paging-query';
+    }
+    
+    if (queryParams['$orderby']) {
+      return 'sort-query';
+    }
+    
+    // Fallback to HTTP method-based classification
+    switch (method) {
+      case 'GET':
+        return analysis.entitySet ? 'entity-read' : 'collection-read';
+      case 'POST':
+        return analysis.entitySet ? 'entity-create' : 'function-call';
+      case 'PUT':
+      case 'PATCH':
+        return 'entity-update';
+      case 'DELETE':
+        return 'entity-delete';
+      default:
+        return 'unknown';
+    }
+  }
+
+  unwrapBatchRequest(requestBody) {
+    if (!requestBody || typeof requestBody !== 'string') {
+      return [];
+    }
+
+    const operations = [];
+    
+    try {
+      // Parse multipart/mixed batch format
+      const lines = requestBody.split('\n');
+      let currentOperation = null;
+      let inRequestHeaders = false;
+      let inRequestBody = false;
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        
+        // Detect batch boundary
+        if (line.startsWith('--batch_') || line.startsWith('--changeset_')) {
+          if (currentOperation) {
+            operations.push(currentOperation);
+          }
+          currentOperation = {
+            type: 'unknown',
+            method: null,
+            url: null,
+            headers: {},
+            body: null
+          };
+          inRequestHeaders = false;
+          inRequestBody = false;
+          continue;
+        }
+        
+        // Parse HTTP request line (e.g., "GET EntitySet HTTP/1.1")
+        if (line.match(/^(GET|POST|PUT|PATCH|DELETE|MERGE)\s+/)) {
+          const match = line.match(/^(\w+)\s+([^\s]+)/);
+          if (match && currentOperation) {
+            currentOperation.method = match[1];
+            currentOperation.url = match[2];
+            currentOperation.type = this.classifyBatchOperation(match[1], match[2]);
+            inRequestHeaders = true;
+            inRequestBody = false;
+          }
+          continue;
+        }
+        
+        // Parse headers
+        if (inRequestHeaders && line.includes(':')) {
+          const [key, ...valueParts] = line.split(':');
+          if (currentOperation) {
+            currentOperation.headers[key.trim()] = valueParts.join(':').trim();
+          }
+          continue;
+        }
+        
+        // Empty line indicates end of headers, start of body
+        if (inRequestHeaders && line === '') {
+          inRequestHeaders = false;
+          inRequestBody = true;
+          continue;
+        }
+        
+        // Collect request body
+        if (inRequestBody && line && currentOperation) {
+          if (!currentOperation.body) {
+            currentOperation.body = '';
+          }
+          currentOperation.body += line + '\n';
+        }
+      }
+      
+      // Add the last operation
+      if (currentOperation) {
+        operations.push(currentOperation);
+      }
+      
+    } catch (error) {
+      this.log('Error unwrapping batch request:', error);
+    }
+    
+    return operations.filter(op => op.method && op.url);
+  }
+
+  classifyBatchOperation(method, url) {
+    if (url.includes('$metadata')) return 'metadata';
+    if (url.includes('$count')) return 'count';
+    if (url.includes('$filter')) return 'filter';
+    if (url.includes('$search')) return 'search';
+    
+    switch (method) {
+      case 'GET': return 'read';
+      case 'POST': return 'create';
+      case 'PUT':
+      case 'PATCH':
+      case 'MERGE': return 'update';
+      case 'DELETE': return 'delete';
+      default: return 'unknown';
+    }
   }
 
   extractRequestBody(requestBody) {
@@ -715,6 +931,12 @@ class FioriTestBackground {
       // Check if this is the first meaningful event that should update session name
       await this.updateSessionNameIfNeeded(session, event, eventData);
 
+      // Filter out redundant or meaningless events first
+      if (this.isRedundantEvent(event, session)) {
+        this.log(`Event filtered out as redundant:`, event.type, event.value || '');
+        return;
+      }
+      
       // Apply verbosity filtering and input event coalescing
       if (this.shouldIncludeEventByVerbosity(event, session)) {
         this.addEventWithCoalescing(session, event);
@@ -817,7 +1039,22 @@ class FioriTestBackground {
   }
 
   extractMeaningfulAppName(event, eventData) {
-    // Method 1: From current page URL
+    // Method 1: Extract from UI5 context - highest priority for Fiori apps
+    const ui5AppInfo = this.extractFioriAppIdFromUI5Context(eventData.ui5Context);
+    if (ui5AppInfo) {
+      // Store detailed app info in session metadata for later use
+      if (event && event.sessionId) {
+        const session = this.sessions.get(event.tabId);
+        if (session) {
+          session.metadata.fioriAppId = ui5AppInfo.appId;
+          session.metadata.fioriAppTitle = ui5AppInfo.appTitle;
+          session.metadata.technicalComponentId = ui5AppInfo.technicalComponentId;
+        }
+      }
+      return ui5AppInfo.sessionName;
+    }
+
+    // Method 2: From current page URL
     if (eventData.pageUrl) {
       const appName = this.generateImprovedSessionNameFromUrl(eventData.pageUrl);
       if (appName && !appName.includes('Launchpad')) {
@@ -825,20 +1062,20 @@ class FioriTestBackground {
       }
     }
 
-    // Method 2: From UI5 app semantics
+    // Method 3: From UI5 app semantics (legacy method)
     if (eventData.ui5Context?.appSemantics?.appType && 
         eventData.ui5Context.appSemantics.appType !== 'unknown') {
       return this.formatAppNameFromSemantics(eventData.ui5Context.appSemantics);
     }
 
-    // Method 3: From page title if available
+    // Method 4: From page title if available
     if (eventData.pageTitle && 
         !eventData.pageTitle.includes('Launchpad') && 
         !eventData.pageTitle.includes('Home')) {
       return eventData.pageTitle.slice(0, 50); // Limit length
     }
 
-    // Method 4: From DOM context (e.g., clicked on specific app tile)
+    // Method 5: From DOM context (e.g., clicked on specific app tile)
     if (event.type === 'click' && eventData.element) {
       const appName = this.extractAppNameFromElement(eventData.element);
       if (appName) {
@@ -847,6 +1084,109 @@ class FioriTestBackground {
     }
 
     return null;
+  }
+
+  extractFioriAppIdFromUI5Context(ui5Context) {
+    if (!ui5Context || !ui5Context.globalUI5Context) {
+      return null;
+    }
+
+    // Look for AppInfo model in the global UI5 context
+    const globalContext = ui5Context.globalUI5Context;
+    
+    // Method 1: Check if AppInfo model is directly available in UI5 context
+    if (globalContext.models && Array.isArray(globalContext.models)) {
+      const appInfoModel = globalContext.models.find(model => 
+        model.name === 'AppInfo' && 
+        model.type === 'sap.ui.model.json.JSONModel' &&
+        model.data
+      );
+      
+      if (appInfoModel && appInfoModel.data) {
+        const appData = appInfoModel.data;
+        const appInfo = {
+          appId: appData.appId?.text || null,
+          appTitle: appData.appTitle?.text || null,
+          appVersion: appData.appVersion?.text || null,
+          technicalComponentId: appData.technicalAppComponentId?.text || null,
+          supportInfo: appData.appSupportInfo?.text || null,
+          frameworkId: appData.appFrameworkId?.text || null,
+          frameworkVersion: appData.appFrameworkVersion?.text || null
+        };
+        
+        // Generate session name from app title or technical component
+        let sessionName = appInfo.appTitle || 'Unknown App';
+        
+        // Clean up common prefixes/suffixes
+        sessionName = sessionName
+          .replace(/^Manage\s+/i, '')
+          .replace(/\s+Management$/i, '')
+          .trim();
+        
+        // Convert to filename-friendly format
+        sessionName = this.cleanNameForFilename(sessionName);
+        
+        this.log('Extracted Fiori App Info from AppInfo model:', appInfo);
+        
+        return {
+          ...appInfo,
+          sessionName: sessionName,
+          source: 'AppInfo-model'
+        };
+      }
+    }
+    
+    // Method 2: Check element UI5 info for component information
+    if (ui5Context.elementUI5Info) {
+      const elementInfo = ui5Context.elementUI5Info;
+      
+      // Look for component ID patterns
+      if (elementInfo.controlId) {
+        const componentMatch = elementInfo.controlId.match(/application-([^-]+)-([^-]+)/);
+        if (componentMatch) {
+          const appInfo = {
+            appId: componentMatch[1] || null,
+            appTitle: this.formatAppNameFromComponentId(componentMatch[2]),
+            technicalComponentId: elementInfo.controlType || null,
+            sessionName: this.formatAppNameFromComponentId(componentMatch[2]),
+            source: 'element-component-id'
+          };
+          
+          this.log('Extracted Fiori App Info from element component ID:', appInfo);
+          return appInfo;
+        }
+      }
+    }
+    
+    // Method 3: Check global UI5 context for app information
+    if (globalContext.appInfo) {
+      const appInfo = {
+        appId: globalContext.appInfo.appId || null,
+        appTitle: globalContext.appInfo.appTitle || null,
+        appVersion: globalContext.appInfo.appVersion || null,
+        technicalComponentId: globalContext.appInfo.technicalComponentId || null,
+        supportInfo: globalContext.appInfo.supportInfo || null,
+        sessionName: this.cleanNameForFilename(
+          globalContext.appInfo.appTitle || 
+          globalContext.appInfo.technicalComponentId || 
+          'Unknown App'
+        ),
+        source: 'global-ui5-appInfo'
+      };
+      
+      this.log('Extracted Fiori App Info from global UI5 context:', appInfo);
+      return appInfo;
+    }
+    
+    return null;
+  }
+
+  formatAppNameFromComponentId(componentId) {
+    // Convert component IDs like "manageDetectionMethod" to "Manage Detection Method"
+    return componentId
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/^manage/i, 'Manage')
+      .trim();
   }
 
   formatAppNameFromSemantics(semantics) {
@@ -883,13 +1223,144 @@ class FioriTestBackground {
     return null;
   }
 
+  isRedundantEvent(event, session) {
+    // Filter out completely empty input events
+    if (event.type === 'input' && (!event.value || event.value.trim() === '')) {
+      // Check if this is the first input in the field (clearing existing value)
+      const lastInputToSameField = session.events.findLast(e => 
+        e.type === 'input' && 
+        e.element?.id === event.element?.id
+      );
+      
+      // If there was a previous non-empty value, this clear action is significant
+      if (lastInputToSameField && lastInputToSameField.value && lastInputToSameField.value.trim() !== '') {
+        return false; // Keep the clearing event
+      }
+      
+      return true; // Filter out empty inputs
+    }
+    
+    // Filter out redundant editing_start with no corresponding editing_end
+    if (event.type === 'editing_start') {
+      // Check if there's already an editing_start for the same element without an end
+      const hasUnfinishedEdit = session.events.some(e => 
+        e.type === 'editing_start' && 
+        e.element?.id === event.element?.id &&
+        !session.events.some(endEvent => 
+          endEvent.type === 'editing_end' && 
+          endEvent.element?.id === e.element?.id &&
+          endEvent.timestamp > e.timestamp
+        )
+      );
+      
+      if (hasUnfinishedEdit) {
+        return true; // Filter out duplicate editing_start
+      }
+    }
+    
+    // Filter out keydown events that don't represent meaningful actions
+    if (event.type === 'keydown') {
+      const key = event.key?.toLowerCase();
+      const meaninglessKeys = ['shift', 'control', 'alt', 'meta', 'capslock'];
+      
+      if (meaninglessKeys.includes(key)) {
+        return true;
+      }
+    }
+    
+    // Filter out rapid repeated clicks on the same element (double/triple clicks)
+    if (event.type === 'click') {
+      const recentClicks = session.events.filter(e => 
+        e.type === 'click' && 
+        e.element?.id === event.element?.id &&
+        event.timestamp - e.timestamp < 500 // Within 500ms
+      );
+      
+      if (recentClicks.length > 0) {
+        this.log('Filtering rapid repeated click');
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  consolidateEditingEvents(session, endEvent) {
+    // Find the corresponding editing_start event
+    const startEvent = session.events.findLast(e => 
+      e.type === 'editing_start' && 
+      e.element?.id === endEvent.element?.id
+    );
+    
+    if (!startEvent) {
+      return null;
+    }
+    
+    const duration = endEvent.timestamp - startEvent.timestamp;
+    const initialValue = startEvent.initialValue || '';
+    const finalValue = endEvent.finalValue || '';
+    const hasChanged = initialValue !== finalValue;
+    
+    // Don't consolidate if no actual change occurred and duration was very short
+    if (!hasChanged && duration < 1000) {
+      return null; // Will remove both events via verbosity filtering
+    }
+    
+    // Create a consolidated "field_edit" event
+    const consolidatedEvent = {
+      eventId: startEvent.eventId, // Keep the original event ID
+      timestamp: startEvent.timestamp,
+      type: 'field_edit',
+      element: startEvent.element,
+      initialValue: initialValue,
+      finalValue: finalValue,
+      duration: duration,
+      hasChanged: hasChanged,
+      ui5Context: endEvent.ui5Context || startEvent.ui5Context,
+      screenshot: endEvent.screenshot || startEvent.screenshot, // Prefer end screenshot
+      // Include both screenshots if different
+      screenshots: [
+        startEvent.screenshot,
+        endEvent.screenshot
+      ].filter(s => s && s.id).filter((s, i, arr) => 
+        arr.findIndex(s2 => s2.id === s.id) === i
+      )
+    };
+    
+    return consolidatedEvent;
+  }
+
   addEventWithCoalescing(session, newEvent) {
     // Configuration for coalescing
     const COALESCING_TIME_THRESHOLD = 1500; // 1.5 seconds
     const COALESCING_ENABLED = true;
 
-    if (!COALESCING_ENABLED || newEvent.type !== 'input') {
-      // No coalescing needed, add event normally
+    if (!COALESCING_ENABLED) {
+      session.events.push(newEvent);
+      return;
+    }
+
+    // Handle editing_start/editing_end consolidation
+    if (newEvent.type === 'editing_end') {
+      const consolidatedEvent = this.consolidateEditingEvents(session, newEvent);
+      if (consolidatedEvent) {
+        // Replace the editing_start event with consolidated event
+        const startEventIndex = session.events.findIndex(e => 
+          e.type === 'editing_start' && 
+          e.element?.id === newEvent.element?.id
+        );
+        
+        if (startEventIndex !== -1) {
+          session.events[startEventIndex] = consolidatedEvent;
+          this.log(`Consolidated editing events for element: ${newEvent.element?.id}`);
+          return; // Don't add the editing_end event
+        }
+      }
+    }
+
+    // Handle input event coalescing
+    if (newEvent.type !== 'input') {
+      // No coalescing needed for non-input events, add normally
       session.events.push(newEvent);
       return;
     }
@@ -953,15 +1424,25 @@ class FioriTestBackground {
       return value.length > 5;
     }
     
+    // Include field edits that resulted in changes
+    if (event.type === 'field_edit') {
+      return event.hasChanged === true;
+    }
+    
     return false;
   }
 
   isDefaultLevelEvent(event, session) {
     // Default mode: Major actions + meaningful inputs, filter out noise
-    const defaultTypes = ['navigation', 'page_load', 'form_submit', 'click', 'editing_start', 'editing_end'];
+    const defaultTypes = ['navigation', 'page_load', 'form_submit', 'click', 'field_edit'];
     
     if (defaultTypes.includes(event.type)) {
       return true;
+    }
+    
+    // Filter out editing_start/editing_end in default mode (they should be consolidated)
+    if (event.type === 'editing_start' || event.type === 'editing_end') {
+      return false;
     }
     
     // Include input events but filter out trivial ones
