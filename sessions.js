@@ -357,23 +357,37 @@ class SessionsManager {
 
   async exportSession(session) {
     try {
-      const sessionData = JSON.stringify(session, null, 2);
-      const blob = new Blob([sessionData], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
+      this.showNotification('Generating JSON export...', 'info');
       
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `fiori-session-${session.sessionId}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      
-      URL.revokeObjectURL(url);
-      
-      this.showNotification('Session exported successfully');
+      // Request semantic filename from background script
+      const response = await chrome.runtime.sendMessage({
+        type: 'export-session-json',
+        sessionId: session.sessionId
+      });
+
+      if (response && response.success) {
+        const sessionData = response.sessionData;
+        const filename = response.filename;
+        
+        const blob = new Blob([sessionData], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        
+        URL.revokeObjectURL(url);
+        
+        this.showNotification('JSON export completed!');
+      } else {
+        throw new Error(response?.error || 'Export failed');
+      }
     } catch (error) {
-      console.error('Export failed:', error);
-      this.showNotification('Export failed', 'error');
+      console.error('JSON export failed:', error);
+      this.showNotification('JSON export failed', 'error');
     }
   }
 

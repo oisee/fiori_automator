@@ -450,6 +450,24 @@ class FioriTestBackground {
           break;
         }
 
+        case 'export-session-json': {
+          try {
+            const exportResult = await this.exportSessionAsJSON(message.sessionId || sender.tab?.id || message.tabId);
+            sendResponse({ 
+              success: true, 
+              sessionData: exportResult.content, 
+              filename: exportResult.filename 
+            });
+          } catch (error) {
+            this.logError('JSON export failed:', error);
+            sendResponse({ 
+              success: false, 
+              error: `JSON export failed: ${error.message}` 
+            });
+          }
+          break;
+        }
+
         case 'export-session-screenshots': {
           const screenshotResult = await this.exportSessionScreenshots(message.sessionId || sender.tab?.id || message.tabId);
           sendResponse({ 
@@ -1679,6 +1697,39 @@ class FioriTestBackground {
     }
   }
 
+  async exportSessionAsJSON(sessionIdentifier) {
+    try {
+      // Get session data
+      let sessionData;
+      if (typeof sessionIdentifier === 'string') {
+        // Session ID provided
+        const allSessions = await this.getAllSessions();
+        sessionData = allSessions[sessionIdentifier];
+      } else {
+        // Tab ID provided
+        sessionData = this.sessions.get(sessionIdentifier);
+      }
+
+      if (!sessionData) {
+        throw new Error('Session not found');
+      }
+
+      // Generate enhanced session data with application intelligence summary
+      const enhancedSessionData = this.generateEnhancedSessionData(sessionData);
+      
+      // Generate semantic filename
+      const filename = this.generateSemanticFilename(sessionData, 'json');
+      
+      return {
+        content: JSON.stringify(enhancedSessionData, null, 2),
+        filename: filename
+      };
+    } catch (error) {
+      this.logError('Failed to export session as JSON:', error);
+      throw error;
+    }
+  }
+
   async exportSessionScreenshots(sessionIdentifier) {
     try {
       // Get session data
@@ -1772,6 +1823,48 @@ class FioriTestBackground {
         detectionMethods: this.getDetectionMethodsUsed(sessionData)
       }
     }, null, 2);
+  }
+
+  generateEnhancedSessionData(sessionData) {
+    // Create a clean session export with screenshot references
+    const cleanSession = this.cleanSessionData(sessionData);
+    
+    // Generate sequence summary for diagram generation
+    const sequenceSummary = this.generateSequenceSummary(sessionData);
+    const odataAnalysis = this.analyzeODataOperations(sessionData.networkRequests || []);
+    
+    return {
+      formatVersion: '1.1',
+      exportedAt: new Date().toISOString(),
+      session: cleanSession,
+      summary: {
+        sequenceSummary: sequenceSummary,
+        odataAnalysis: odataAnalysis,
+        screenshotCount: this.countScreenshotsInSession(sessionData),
+        eventCount: sessionData.events?.length || 0,
+        networkRequestCount: sessionData.networkRequests?.length || 0,
+        // Enhanced application intelligence summary
+        applicationIntelligence: {
+          fioriAppId: sessionData.metadata?.fioriAppId || null,
+          appTitle: sessionData.metadata?.ui5ModelData?.appInfo?.appTitle || null,
+          appVersion: sessionData.metadata?.ui5ModelData?.appInfo?.appVersion || null,
+          technicalComponent: sessionData.metadata?.ui5ModelData?.appInfo?.technicalComponentId || null,
+          framework: sessionData.metadata?.ui5ModelData?.appInfo?.frameworkId || null,
+          frameworkVersion: sessionData.metadata?.ui5ModelData?.appInfo?.frameworkVersion || null,
+          odataServicesDetected: sessionData.metadata?.odataServiceCorrelations?.length || 0,
+          businessContexts: this.extractBusinessContexts(sessionData.metadata?.odataServiceCorrelations || []),
+          hasAppsLibraryIntegration: !!sessionData.metadata?.fioriAppsLibraryInfo,
+          audioRecorded: !!sessionData.metadata?.audioRecording
+        }
+      },
+      metadata: {
+        screenshotCount: this.countScreenshotsInSession(sessionData),
+        eventCount: sessionData.events?.length || 0,
+        networkRequestCount: sessionData.networkRequests?.length || 0,
+        enhancedMetadataVersion: '1.1',
+        detectionMethods: this.getDetectionMethodsUsed(sessionData)
+      }
+    };
   }
 
   collectScreenshotIds(sessionData) {
