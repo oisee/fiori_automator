@@ -224,6 +224,7 @@ class SessionsManager {
           <p><strong>Audio Recording:</strong> ${session.metadata?.audioRecording ? '🎤 Yes' : '❌ No'}</p>
           ${session.metadata?.fioriAppId ? `<p><strong>Fiori App ID:</strong> ${session.metadata.fioriAppId}</p>` : ''}
           ${session.metadata?.fioriAppsLibraryInfo ? `<p><strong>Apps Library:</strong> <a href="${session.metadata.fioriAppsLibraryInfo.apiUrl}" target="_blank">View Details</a></p>` : ''}
+          ${session.metadata?.ui5ModelData ? this.renderUI5ModelData(session.metadata.ui5ModelData) : ''}
           ${session.metadata?.odataServiceCorrelations ? this.renderODataCorrelations(session.metadata.odataServiceCorrelations) : ''}
           
           <div class="event-list">
@@ -239,6 +240,49 @@ class SessionsManager {
       modalBody.innerHTML = '<p>Error loading session details</p>';
       modal.style.display = 'flex';
     }
+  }
+
+  renderUI5ModelData(ui5ModelData) {
+    if (!ui5ModelData || Object.keys(ui5ModelData).length === 0) {
+      return '';
+    }
+    
+    return `
+      <div class="ui5-model-data">
+        <h4>📱 UI5 Application Details</h4>
+        ${ui5ModelData.appInfo ? `
+          <div class="model-section">
+            <h5>Application Information</h5>
+            <div class="model-item">
+              ${ui5ModelData.appInfo.appTitle ? `<p><strong>App Title:</strong> ${ui5ModelData.appInfo.appTitle}</p>` : ''}
+              ${ui5ModelData.appInfo.appVersion ? `<p><strong>Version:</strong> ${ui5ModelData.appInfo.appVersion}</p>` : ''}
+              ${ui5ModelData.appInfo.technicalComponentId ? `<p><strong>Technical Component:</strong> ${ui5ModelData.appInfo.technicalComponentId}</p>` : ''}
+              ${ui5ModelData.appInfo.supportInfo ? `<p><strong>Support Component:</strong> ${ui5ModelData.appInfo.supportInfo}</p>` : ''}
+              ${ui5ModelData.appInfo.frameworkId ? `<p><strong>Framework:</strong> ${ui5ModelData.appInfo.frameworkId}</p>` : ''}
+              ${ui5ModelData.appInfo.frameworkVersion ? `<p><strong>Framework Version:</strong> ${ui5ModelData.appInfo.frameworkVersion}</p>` : ''}
+            </div>
+          </div>
+        ` : ''}
+        ${ui5ModelData.systemInfo ? `
+          <div class="model-section">
+            <h5>System Information</h5>
+            <div class="model-item">
+              ${ui5ModelData.systemInfo.productVersion ? `<p><strong>Product Version:</strong> <pre class="version-text">${ui5ModelData.systemInfo.productVersion}</pre></p>` : ''}
+            </div>
+          </div>
+        ` : ''}
+        ${Object.keys(ui5ModelData).filter(key => key !== 'appInfo' && key !== 'systemInfo').length > 0 ? `
+          <div class="model-section">
+            <h5>Additional Models</h5>
+            ${Object.keys(ui5ModelData).filter(key => key !== 'appInfo' && key !== 'systemInfo').map(modelName => `
+              <div class="model-item">
+                <p><strong>${modelName} Model:</strong> <code>${JSON.stringify(ui5ModelData[modelName]).slice(0, 200)}${JSON.stringify(ui5ModelData[modelName]).length > 200 ? '...' : ''}</code></p>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+      </div>
+    `;
   }
 
   renderODataCorrelations(correlations) {

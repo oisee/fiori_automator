@@ -1335,6 +1335,13 @@ class FioriTestBackground {
         session.metadata.fioriAppsLibraryInfo = await this.queryFioriAppsLibraryAPI(fioriAppId);
         this.log('Enhanced session with Fiori App ID:', fioriAppId);
       }
+
+      // Extract additional app metadata from UI5 models
+      const additionalMetadata = this.extractAdditionalAppMetadata(session);
+      if (additionalMetadata) {
+        session.metadata.ui5ModelData = additionalMetadata;
+        this.log('Enhanced session with UI5 model metadata:', Object.keys(additionalMetadata));
+      }
       
       // Correlate OData services with potential Fiori apps
       const odataCorrelations = await this.correlateODataServicesWithApps(session);
@@ -2671,19 +2678,35 @@ class FioriTestBackground {
       const events = session.events || [];
       const requests = session.networkRequests || [];
 
-      // Method 1: Extract from URL hash patterns
+      // Method 1: Extract from UI5 About Dialog elements (highest priority)
+      const aboutDialogAppId = this.extractAppIdFromAboutDialog(session);
+      if (aboutDialogAppId) {
+        this.log('Found Fiori App ID from About Dialog:', aboutDialogAppId);
+        return aboutDialogAppId;
+      }
+
+      // Method 2: Extract from UI5 Model data (AppInfo JSONModel)
+      const modelAppId = this.extractAppIdFromUI5Models(session);
+      if (modelAppId) {
+        this.log('Found Fiori App ID from UI5 models:', modelAppId);
+        return modelAppId;
+      }
+
+      // Method 3: Extract from URL hash patterns
       const hashMatch = url.match(/#([A-Z]\d{4})-/);
       if (hashMatch) {
+        this.log('Found Fiori App ID from URL hash:', hashMatch[1]);
         return hashMatch[1]; // Returns F1730, F2305, etc.
       }
 
-      // Method 2: Extract from Fiori Apps Library URL patterns
+      // Method 4: Extract from Fiori Apps Library URL patterns
       const libraryMatch = url.match(/inpfioriId='([A-Z]\d{4})'/);
       if (libraryMatch) {
+        this.log('Found Fiori App ID from Apps Library URL:', libraryMatch[1]);
         return libraryMatch[1];
       }
 
-      // Method 3: Look for app manifest requests in network requests
+      // Method 5: Look for app manifest requests in network requests
       const manifestRequest = requests.find(req => 
         req.url && req.url.includes('manifest.json')
       );
@@ -2691,17 +2714,19 @@ class FioriTestBackground {
         // Could parse manifest.json content if available
         const appIdMatch = manifestRequest.url.match(/apps\/([A-Z]\d{4})\//);
         if (appIdMatch) {
+          this.log('Found Fiori App ID from manifest request:', appIdMatch[1]);
           return appIdMatch[1];
         }
       }
 
-      // Method 4: Look for Fiori Apps Library API calls
+      // Method 6: Look for Fiori Apps Library API calls
       const apiRequest = requests.find(req => 
         req.url && req.url.includes('SingleApp.xsodata') && req.url.includes('fioriId=')
       );
       if (apiRequest) {
         const apiMatch = apiRequest.url.match(/fioriId='([A-Z]\d{4})'/);
         if (apiMatch) {
+          this.log('Found Fiori App ID from API request:', apiMatch[1]);
           return apiMatch[1];
         }
       }
@@ -2711,6 +2736,110 @@ class FioriTestBackground {
       this.logError('Error extracting Fiori App ID:', error);
       return null;
     }
+  }
+
+  extractAppIdFromAboutDialog(session) {
+    // Look for About Dialog interactions containing App ID
+    const aboutDialogEvents = session.events?.filter(event => 
+      event.element?.id?.includes('aboutDialogFragment') ||
+      event.element?.id?.includes('appInfoAppId') ||
+      event.element?.className?.includes('AboutDialog')
+    );
+
+    for (const event of aboutDialogEvents || []) {
+      // Check text content for App ID pattern
+      if (event.element?.textContent) {
+        const appIdMatch = event.element.textContent.match(/^([A-Z]\d{4})$/);
+        if (appIdMatch) {
+          return appIdMatch[1];
+        }
+      }
+
+      // Check element ID for App ID pattern  
+      if (event.element?.id) {
+        const idMatch = event.element.id.match(/([A-Z]\d{4})/);
+        if (idMatch) {
+          return idMatch[1];
+        }
+      }
+    }
+
+    return null;
+  }
+
+  extractAppIdFromUI5Models(session) {
+    // Look for UI5 context that might contain model data
+    for (const event of session.events || []) {
+      if (event.ui5Context) {
+        // Check for AppInfo model
+        if (event.ui5Context.model?.name === 'AppInfo' && 
+            event.ui5Context.model?.data?.appId?.text) {
+          const appId = event.ui5Context.model.data.appId.text;
+          if (/^[A-Z]\d{4}$/.test(appId)) {
+            return appId;
+          }
+        }
+
+        // Check for binding paths to App ID
+        if (event.ui5Context.properties) {
+          for (const prop of event.ui5Context.properties) {
+            if (prop.path?.includes('/appId/text') && prop.value) {
+              const appId = prop.value;
+              if (/^[A-Z]\d{4}$/.test(appId)) {
+                return appId;
+              }
+            }
+          }
+        }
+
+        // Check for any property containing App ID pattern
+        const contextStr = JSON.stringify(event.ui5Context);
+        const appIdMatch = contextStr.match(/"([A-Z]\d{4})"/);
+        if (appIdMatch) {
+          return appIdMatch[1];
+        }
+      }
+    }
+
+    return null;
+  }
+
+  extractAdditionalAppMetadata(session) {
+    // Extract rich metadata from UI5 models
+    const metadata = {};
+
+    for (const event of session.events || []) {
+      if (event.ui5Context?.model) {
+        const model = event.ui5Context.model;
+
+        // Extract from AppInfo model
+        if (model.name === 'AppInfo' && model.data) {
+          metadata.appInfo = {
+            appId: model.data.appId?.text,
+            appVersion: model.data.appVersion?.text,
+            appTitle: model.data.appTitle?.text,
+            technicalComponentId: model.data.technicalAppComponentId?.text,
+            frameworkId: model.data.appFrameworkId?.text,
+            frameworkVersion: model.data.appFrameworkVersion?.text,
+            supportInfo: model.data.appSupportInfo?.text
+          };
+        }
+
+        // Extract from SysInfo model
+        if (model.name === 'SysInfo' && model.data) {
+          metadata.systemInfo = {
+            productVersion: model.data.productVersion?.text
+          };
+        }
+
+        // Extract from other named models
+        if (model.name && model.data && !metadata[model.name]) {
+          metadata[model.name] = model.data;
+        }
+      }
+    }
+
+    return Object.keys(metadata).length > 0 ? metadata : null;
   }
 
   async queryFioriAppsLibraryAPI(appId) {
