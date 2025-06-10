@@ -1741,7 +1741,7 @@ class FioriTestBackground {
     const odataAnalysis = this.analyzeODataOperations(sessionData.networkRequests || []);
     
     return JSON.stringify({
-      formatVersion: '1.0',
+      formatVersion: '1.1',
       exportedAt: new Date().toISOString(),
       session: cleanSession,
       summary: {
@@ -1749,12 +1749,27 @@ class FioriTestBackground {
         odataAnalysis: odataAnalysis,
         screenshotCount: this.countScreenshotsInSession(sessionData),
         eventCount: sessionData.events?.length || 0,
-        networkRequestCount: sessionData.networkRequests?.length || 0
+        networkRequestCount: sessionData.networkRequests?.length || 0,
+        // Enhanced application intelligence summary
+        applicationIntelligence: {
+          fioriAppId: sessionData.metadata?.fioriAppId || null,
+          appTitle: sessionData.metadata?.ui5ModelData?.appInfo?.appTitle || null,
+          appVersion: sessionData.metadata?.ui5ModelData?.appInfo?.appVersion || null,
+          technicalComponent: sessionData.metadata?.ui5ModelData?.appInfo?.technicalComponentId || null,
+          framework: sessionData.metadata?.ui5ModelData?.appInfo?.frameworkId || null,
+          frameworkVersion: sessionData.metadata?.ui5ModelData?.appInfo?.frameworkVersion || null,
+          odataServicesDetected: sessionData.metadata?.odataServiceCorrelations?.length || 0,
+          businessContexts: this.extractBusinessContexts(sessionData.metadata?.odataServiceCorrelations || []),
+          hasAppsLibraryIntegration: !!sessionData.metadata?.fioriAppsLibraryInfo,
+          audioRecorded: !!sessionData.metadata?.audioRecording
+        }
       },
       metadata: {
         screenshotCount: this.countScreenshotsInSession(sessionData),
         eventCount: sessionData.events?.length || 0,
-        networkRequestCount: sessionData.networkRequests?.length || 0
+        networkRequestCount: sessionData.networkRequests?.length || 0,
+        enhancedMetadataVersion: '1.1',
+        detectionMethods: this.getDetectionMethodsUsed(sessionData)
       }
     }, null, 2);
   }
@@ -2494,6 +2509,58 @@ class FioriTestBackground {
       });
     }
 
+    // Add enhanced metadata from UI5 models and Fiori Apps Library
+    if (session.metadata?.ui5ModelData || session.metadata?.fioriAppsLibraryInfo || session.metadata?.odataServiceCorrelations) {
+      markdown += `## Application Intelligence\n\n`;
+      
+      // UI5 Application Details
+      if (session.metadata?.ui5ModelData?.appInfo) {
+        const appInfo = session.metadata.ui5ModelData.appInfo;
+        markdown += `### 📱 Application Information\n\n`;
+        if (appInfo.appTitle) markdown += `- **App Title**: ${appInfo.appTitle}\n`;
+        if (appInfo.appId) markdown += `- **App ID**: ${appInfo.appId}\n`;
+        if (appInfo.appVersion) markdown += `- **Version**: ${appInfo.appVersion}\n`;
+        if (appInfo.technicalComponentId) markdown += `- **Technical Component**: ${appInfo.technicalComponentId}\n`;
+        if (appInfo.supportInfo) markdown += `- **Support Component**: ${appInfo.supportInfo}\n`;
+        if (appInfo.frameworkId) markdown += `- **Framework**: ${appInfo.frameworkId}\n`;
+        if (appInfo.frameworkVersion) markdown += `- **Framework Version**: ${appInfo.frameworkVersion}\n`;
+        markdown += `\n`;
+      }
+      
+      // System Information
+      if (session.metadata?.ui5ModelData?.systemInfo) {
+        const sysInfo = session.metadata.ui5ModelData.systemInfo;
+        markdown += `### 🖥️ System Information\n\n`;
+        if (sysInfo.productVersion) {
+          markdown += `**Product Versions**:\n\`\`\`\n${sysInfo.productVersion}\n\`\`\`\n\n`;
+        }
+      }
+      
+      // OData Service Correlations
+      if (session.metadata?.odataServiceCorrelations?.length > 0) {
+        markdown += `### 🔗 OData Service Analysis\n\n`;
+        session.metadata.odataServiceCorrelations.forEach((correlation, index) => {
+          markdown += `${index + 1}. **${correlation.serviceName}**\n`;
+          markdown += `   - Namespace: ${correlation.namespace}\n`;
+          markdown += `   - Business Context: ${correlation.businessContext}\n`;
+          if (correlation.estimatedAppMapping) {
+            markdown += `   - App Category: ${correlation.estimatedAppMapping}\n`;
+          }
+          if (correlation.potentialAppIds.length > 0) {
+            markdown += `   - Potential App IDs: ${correlation.potentialAppIds.join(', ')}\n`;
+          }
+          markdown += `   - [Service Metadata](${correlation.metadataUrl})\n\n`;
+        });
+      }
+      
+      // Fiori Apps Library Info
+      if (session.metadata?.fioriAppsLibraryInfo) {
+        markdown += `### 📚 Fiori Apps Library\n\n`;
+        markdown += `- **API Endpoint**: [View Details](${session.metadata.fioriAppsLibraryInfo.apiUrl})\n`;
+        markdown += `- **Metadata**: [Service Metadata](${session.metadata.fioriAppsLibraryInfo.metadataUrl})\n\n`;
+      }
+    }
+
     // Add sequence summary for debugging/reference
     if (sequenceSummary.interactions.length > 0) {
       markdown += `## Session Summary\n\n`;
@@ -2596,7 +2663,15 @@ class FioriTestBackground {
     
     this.log('Extracting concise session name:', { sessionName, url });
     
-    // Method 1: Always prioritize actual session name if it's meaningful
+    // Method 1: Use enhanced UI5 model data if available (highest priority)
+    if (session.metadata?.ui5ModelData?.appInfo?.appTitle) {
+      const appTitle = session.metadata.ui5ModelData.appInfo.appTitle;
+      const cleanedTitle = this.cleanNameForFilename(appTitle);
+      this.log('Using UI5 AppInfo title:', cleanedTitle);
+      return cleanedTitle;
+    }
+    
+    // Method 2: Always prioritize actual session name if it's meaningful
     if (sessionName && sessionName !== 'Session' && !sessionName.startsWith('Session ')) {
       // Handle specific patterns first for known app names
       const lowerName = sessionName.toLowerCase();
@@ -2973,6 +3048,41 @@ class FioriTestBackground {
       return numberMatch ? numberMatch[1] : '';
     }
     return '';
+  }
+
+  extractBusinessContexts(odataCorrelations) {
+    // Extract unique business contexts from OData service correlations
+    const contexts = new Set();
+    odataCorrelations.forEach(correlation => {
+      if (correlation.businessContext && correlation.businessContext !== 'unknown') {
+        contexts.add(correlation.businessContext);
+      }
+    });
+    return Array.from(contexts);
+  }
+
+  getDetectionMethodsUsed(sessionData) {
+    // Document which detection methods were used to enhance the session
+    const methods = [];
+    
+    if (sessionData.metadata?.fioriAppId) {
+      if (sessionData.metadata?.ui5ModelData?.appInfo) {
+        methods.push('ui5-about-dialog');
+        methods.push('ui5-model-data');
+      } else {
+        methods.push('url-hash-extraction');
+      }
+    }
+    
+    if (sessionData.metadata?.odataServiceCorrelations?.length > 0) {
+      methods.push('odata-service-correlation');
+    }
+    
+    if (sessionData.metadata?.fioriAppsLibraryInfo) {
+      methods.push('fiori-apps-library-integration');
+    }
+    
+    return methods;
   }
 
   generateImprovedSessionNameFromUrl(url) {
