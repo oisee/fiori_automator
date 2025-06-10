@@ -224,6 +224,7 @@ class SessionsManager {
           <p><strong>Audio Recording:</strong> ${session.metadata?.audioRecording ? '🎤 Yes' : '❌ No'}</p>
           ${session.metadata?.fioriAppId ? `<p><strong>Fiori App ID:</strong> ${session.metadata.fioriAppId}</p>` : ''}
           ${session.metadata?.fioriAppsLibraryInfo ? `<p><strong>Apps Library:</strong> <a href="${session.metadata.fioriAppsLibraryInfo.apiUrl}" target="_blank">View Details</a></p>` : ''}
+          ${session.metadata?.odataServiceCorrelations ? this.renderODataCorrelations(session.metadata.odataServiceCorrelations) : ''}
           
           <div class="event-list">
             <h3>Events Timeline</h3>
@@ -238,6 +239,28 @@ class SessionsManager {
       modalBody.innerHTML = '<p>Error loading session details</p>';
       modal.style.display = 'flex';
     }
+  }
+
+  renderODataCorrelations(correlations) {
+    if (!correlations || correlations.length === 0) {
+      return '';
+    }
+    
+    return `
+      <div class="odata-correlations">
+        <h4>🔗 OData Service Analysis</h4>
+        ${correlations.map(correlation => `
+          <div class="correlation-item">
+            <p><strong>Service:</strong> ${correlation.serviceName}</p>
+            <p><strong>Namespace:</strong> ${correlation.namespace}</p>
+            <p><strong>Business Context:</strong> ${correlation.businessContext}</p>
+            ${correlation.estimatedAppMapping ? `<p><strong>Estimated App Category:</strong> ${correlation.estimatedAppMapping}</p>` : ''}
+            ${correlation.potentialAppIds.length > 0 ? `<p><strong>Potential App IDs:</strong> ${correlation.potentialAppIds.join(', ')}</p>` : ''}
+            <p><strong>Metadata:</strong> <a href="${correlation.metadataUrl}" target="_blank">View Service Metadata</a></p>
+          </div>
+        `).join('')}
+      </div>
+    `;
   }
 
   renderEventList(events) {

@@ -320,3 +320,44 @@ body {
     white-space: pre-wrap;
     font-family: monospace;
 }
+
+/* OData Service Correlations */
+.odata-correlations {
+    margin-top: 20px;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    border-left: 4px solid #0070f3;
+}
+
+.odata-correlations h4 {
+    margin-bottom: 15px;
+    color: #0070f3;
+    font-size: 14px;
+}
+
+.correlation-item {
+    background: white;
+    padding: 12px;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    border: 1px solid #e9ecef;
+    font-size: 12px;
+}
+
+.correlation-item:last-child {
+    margin-bottom: 0;
+}
+
+.correlation-item p {
+    margin: 5px 0;
+}
+
+.correlation-item a {
+    color: #0070f3;
+    text-decoration: none;
+}
+
+.correlation-item a:hover {
+    text-decoration: underline;
+}

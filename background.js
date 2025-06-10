@@ -1336,12 +1336,19 @@ class FioriTestBackground {
         this.log('Enhanced session with Fiori App ID:', fioriAppId);
       }
       
+      // Correlate OData services with potential Fiori apps
+      const odataCorrelations = await this.correlateODataServicesWithApps(session);
+      if (odataCorrelations.length > 0) {
+        session.metadata.odataServiceCorrelations = odataCorrelations;
+        this.log('Added OData service correlations:', odataCorrelations.length, 'services');
+      }
+      
       // Clean session data before saving
       const cleanSession = this.cleanSessionData(session);
       sessions[session.sessionId] = cleanSession;
       
       await chrome.storage.local.set({ fioriSessions: sessions });
-      this.log('Session saved successfully');
+      this.log('Session saved successfully with enhanced metadata');
     } catch (error) {
       this.logError('Failed to save session:', error);
     }
@@ -2719,12 +2726,124 @@ class FioriTestBackground {
       return {
         appId: appId,
         apiUrl: apiUrl,
-        metadataUrl: 'https://fioriappslibrary.hana.ondemand.com/sap/fix/externalViewer/services/SingleApp.xsodata/$metadata'
+        metadataUrl: 'https://fioriappslibrary.hana.ondemand.com/sap/fix/externalViewer/services/SingleApp.xsodata/$metadata',
+        odataServicesUrl: `${apiUrl}`
       };
     } catch (error) {
       this.logError('Error querying Fiori Apps Library API:', error);
       return null;
     }
+  }
+
+  async correlateODataServicesWithApps(session) {
+    try {
+      // Extract unique OData service URLs from network requests
+      const odataServices = new Set();
+      
+      session.networkRequests?.forEach(request => {
+        if (request.type?.includes('odata') && request.url) {
+          // Extract service root URL (everything before the entity set)
+          const match = request.url.match(/(.*\/sap\/opu\/odata\/.*?)\/[^/]*$/);
+          if (match) {
+            odataServices.add(match[1]);
+          }
+        }
+      });
+
+      const correlations = [];
+      
+      for (const serviceUrl of odataServices) {
+        try {
+          // Extract potential app information from service URL patterns
+          const serviceInfo = this.extractServiceMetadata(serviceUrl);
+          
+          correlations.push({
+            serviceUrl: serviceUrl,
+            metadataUrl: `${serviceUrl}/$metadata`,
+            serviceName: serviceInfo.serviceName,
+            namespace: serviceInfo.namespace,
+            potentialAppIds: serviceInfo.potentialAppIds,
+            businessContext: serviceInfo.businessContext,
+            estimatedAppMapping: serviceInfo.estimatedAppMapping
+          });
+          
+          this.log('Found OData service correlation:', serviceInfo);
+        } catch (error) {
+          this.log('Failed to correlate service:', serviceUrl, error.message);
+        }
+      }
+      
+      return correlations;
+    } catch (error) {
+      this.logError('Failed to correlate OData services:', error);
+      return [];
+    }
+  }
+
+  extractServiceMetadata(serviceUrl) {
+    const urlParts = serviceUrl.split('/');
+    const serviceName = urlParts[urlParts.length - 1];
+    
+    // Extract namespace from URL pattern
+    const namespaceMatch = serviceUrl.match(/\/sap\/opu\/odata\/([^/]+)\/([^/]+)/);
+    const namespace = namespaceMatch ? namespaceMatch[1] : 'unknown';
+    
+    // Infer potential Fiori App IDs from service patterns
+    const potentialAppIds = [];
+    
+    // Common patterns in Fiori service names
+    if (serviceName.includes('MANAGE')) {
+      const id = this.extractAppIdFromPattern(serviceName, 'MANAGE');
+      if (id) potentialAppIds.push('F' + id);
+    }
+    if (serviceName.includes('CREATE')) {
+      const id = this.extractAppIdFromPattern(serviceName, 'CREATE');
+      if (id) potentialAppIds.push('F' + id);
+    }
+    if (serviceName.includes('DISPLAY')) {
+      const id = this.extractAppIdFromPattern(serviceName, 'DISPLAY');
+      if (id) potentialAppIds.push('F' + id);
+    }
+    
+    // Business context inference from service name patterns
+    let businessContext = 'unknown';
+    let estimatedAppMapping = null;
+    
+    if (serviceName.includes('COMPLIANCE') || serviceName.includes('ALERT')) {
+      businessContext = 'compliance-management';
+      estimatedAppMapping = 'Alert Management Apps';
+    } else if (serviceName.includes('MASTER') || serviceName.includes('DATA')) {
+      businessContext = 'master-data';
+      estimatedAppMapping = 'Master Data Management';
+    } else if (serviceName.includes('FINANCIAL') || serviceName.includes('FIN')) {
+      businessContext = 'financial';
+      estimatedAppMapping = 'Financial Applications';
+    } else if (serviceName.includes('WORKFLOW') || serviceName.includes('WF')) {
+      businessContext = 'workflow';
+      estimatedAppMapping = 'Workflow Management';
+    } else if (serviceName.includes('ANALYTICS') || serviceName.includes('REPORT')) {
+      businessContext = 'analytics';
+      estimatedAppMapping = 'Analytics & Reporting';
+    }
+    
+    return {
+      serviceName,
+      namespace,
+      potentialAppIds: potentialAppIds.filter(id => id !== 'F'),
+      businessContext,
+      estimatedAppMapping
+    };
+  }
+
+  extractAppIdFromPattern(serviceName, pattern) {
+    // Extract potential app ID from service name patterns
+    const afterPattern = serviceName.split(pattern)[1];
+    if (afterPattern) {
+      // Look for 4-digit numbers which are common in Fiori App IDs
+      const numberMatch = afterPattern.match(/(\d{4})/);
+      return numberMatch ? numberMatch[1] : '';
+    }
+    return '';
   }
 
   generateImprovedSessionNameFromUrl(url) {
