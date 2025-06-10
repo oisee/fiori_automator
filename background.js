@@ -2946,10 +2946,10 @@ class FioriTestBackground {
       
       session.networkRequests?.forEach(request => {
         if (request.type?.includes('odata') && request.url) {
-          // Extract service root URL (everything before the entity set)
-          const match = request.url.match(/(.*\/sap\/opu\/odata\/.*?)\/[^/]*$/);
-          if (match) {
-            odataServices.add(match[1]);
+          // Extract service root URL, properly handling OData system parameters
+          const serviceRoot = this.extractODataServiceRoot(request.url);
+          if (serviceRoot) {
+            odataServices.add(serviceRoot);
           }
         }
       });
@@ -2961,7 +2961,7 @@ class FioriTestBackground {
           // Extract potential app information from service URL patterns
           const serviceInfo = this.extractServiceMetadata(serviceUrl);
           
-          correlations.push({
+          const correlation = {
             serviceUrl: serviceUrl,
             metadataUrl: `${serviceUrl}/$metadata`,
             serviceName: serviceInfo.serviceName,
@@ -2969,6 +2969,14 @@ class FioriTestBackground {
             potentialAppIds: serviceInfo.potentialAppIds,
             businessContext: serviceInfo.businessContext,
             estimatedAppMapping: serviceInfo.estimatedAppMapping
+          };
+          
+          correlations.push(correlation);
+          
+          this.log('DEBUG: Created OData correlation:', {
+            serviceName: correlation.serviceName,
+            namespace: correlation.namespace,
+            metadataUrl: correlation.metadataUrl
           });
           
           this.log('Found OData service correlation:', serviceInfo);
@@ -2984,13 +2992,67 @@ class FioriTestBackground {
     }
   }
 
+  extractODataServiceRoot(url) {
+    try {
+      // Remove query parameters first
+      const baseUrl = url.split('?')[0];
+      
+      // OData system parameters that should be ignored when extracting service root
+      const odataSystemParams = [
+        '$value', '$metadata', '$batch', '$count', '$links', '$ref',
+        '$orderby', '$top', '$skip', '$filter', '$expand', '$select',
+        '$format', '$inlinecount', '$skiptoken'
+      ];
+      
+      // Find the OData service pattern: /sap/opu/odata/namespace/servicename with optional version
+      const odataMatch = baseUrl.match(/(.*\/sap\/opu\/odata\/[^/]+\/[^/;]+(?:;v=\d+)?)/);
+      if (!odataMatch) {
+        return null;
+      }
+      
+      let serviceRoot = odataMatch[1];
+      
+      // Get the part after the service root
+      const afterService = baseUrl.substring(serviceRoot.length);
+      
+      // If there's more after the service root, analyze it to determine if we need to clean it
+      if (afterService) {
+        const pathSegments = afterService.split('/').filter(segment => segment.length > 0);
+        
+        // Check if any segment contains OData system parameters
+        const hasSystemParam = pathSegments.some(segment => {
+          // Check if the segment itself is a system parameter
+          if (odataSystemParams.some(param => segment.startsWith(param))) {
+            return true;
+          }
+          // Also check if the segment contains $value in nested paths
+          return segment.includes('$value') || segment.includes('$metadata');
+        });
+        
+        this.log('DEBUG: Extracted service root:', serviceRoot, 'from URL:', url);
+        this.log('DEBUG: After service path segments:', pathSegments);
+        this.log('DEBUG: Has system param:', hasSystemParam);
+        
+        // If we detect system parameters anywhere in the path, we know this is the correct service root
+        // The presence of $value, $metadata, etc. confirms we've found the right boundary
+      }
+      
+      return serviceRoot;
+    } catch (error) {
+      this.log('Failed to extract OData service root from:', url, error.message);
+      return null;
+    }
+  }
+
   extractServiceMetadata(serviceUrl) {
-    const urlParts = serviceUrl.split('/');
-    const serviceName = urlParts[urlParts.length - 1];
+    // Extract service name and namespace from the service root URL
+    const serviceMatch = serviceUrl.match(/\/sap\/opu\/odata\/([^/]+)\/([^/;]+)/);
+    if (!serviceMatch) {
+      throw new Error('Invalid OData service URL format');
+    }
     
-    // Extract namespace from URL pattern
-    const namespaceMatch = serviceUrl.match(/\/sap\/opu\/odata\/([^/]+)\/([^/]+)/);
-    const namespace = namespaceMatch ? namespaceMatch[1] : 'unknown';
+    const namespace = serviceMatch[1];
+    const serviceName = serviceMatch[2];
     
     // Infer potential Fiori App IDs from service patterns
     const potentialAppIds = [];
@@ -3437,4 +3499,5 @@ class FioriTestBackground {
 }
 
 // Initialize background script
-new FioriTestBackground();
+const backgroundInstance = new FioriTestBackground();
+
