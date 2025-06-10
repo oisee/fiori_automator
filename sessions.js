@@ -58,20 +58,12 @@ class SessionsManager {
       this.exportSession(this.selectedSession);
     });
 
-    document.getElementById('modalExportMarkdownBtn').addEventListener('click', () => {
-      this.exportSessionAsMarkdown(this.selectedSession);
-    });
-
-    document.getElementById('modalExportZipBtn').addEventListener('click', () => {
-      this.exportSessionAsZip(this.selectedSession);
+    document.getElementById('modalExportBundleBtn').addEventListener('click', () => {
+      this.exportSessionAsBundle(this.selectedSession);
     });
 
     document.getElementById('modalExportAudioBtn').addEventListener('click', () => {
       this.exportSessionAsAudio(this.selectedSession);
-    });
-
-    document.getElementById('modalExportZipPackageBtn').addEventListener('click', () => {
-      this.exportSessionAsZipPackage(this.selectedSession);
     });
 
     document.getElementById('modalReplayBtn').addEventListener('click', () => {
@@ -385,97 +377,7 @@ class SessionsManager {
     }
   }
 
-  async exportSessionAsMarkdown(session) {
-    try {
-      this.showNotification('Generating markdown export...', 'info');
-      
-      const response = await chrome.runtime.sendMessage({
-        type: 'export-session-markdown',
-        sessionId: session.sessionId
-      });
 
-      if (response && response.success) {
-        const markdownContent = response.zipData; // This is actually markdown content
-        const blob = new Blob([markdownContent], { type: 'text/markdown' });
-        const url = URL.createObjectURL(blob);
-        
-        const a = document.createElement('a');
-        a.href = url;
-        // Use semantic filename from response or fallback
-        a.download = response.filename || `fiori-session-${session.sessionId}-export.md`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        
-        URL.revokeObjectURL(url);
-        this.showNotification('Markdown export completed!');
-      } else {
-        throw new Error(response?.error || 'Export failed');
-      }
-    } catch (error) {
-      console.error('Markdown export failed:', error);
-      this.showNotification('Markdown export failed', 'error');
-    }
-  }
-
-  async exportSessionAsZip(session) {
-    try {
-      this.showNotification('Exporting session with screenshots...', 'info');
-      
-      const response = await chrome.runtime.sendMessage({
-        type: 'export-session-screenshots',
-        sessionId: session.sessionId
-      });
-
-      if (response && response.success) {
-        // Download session JSON first
-        const sessionBlob = new Blob([response.sessionData], { type: 'application/json' });
-        const sessionUrl = URL.createObjectURL(sessionBlob);
-        
-        const sessionLink = document.createElement('a');
-        sessionLink.href = sessionUrl;
-        sessionLink.download = response.filename || `fiori-session-${session.sessionId}.json`;
-        document.body.appendChild(sessionLink);
-        sessionLink.click();
-        document.body.removeChild(sessionLink);
-        URL.revokeObjectURL(sessionUrl);
-
-        // Download each screenshot individually
-        if (response.screenshots && response.screenshots.length > 0) {
-          for (const screenshot of response.screenshots) {
-            // Convert data URL to blob
-            const base64Data = screenshot.dataUrl.split(',')[1];
-            const byteCharacters = atob(base64Data);
-            const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
-              byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: 'image/png' });
-            
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = screenshot.filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-            
-            // Small delay to prevent browser blocking multiple downloads
-            await new Promise(resolve => setTimeout(resolve, 100));
-          }
-        }
-        
-        this.showNotification(`Export completed! ${response.screenshotCount || 0} screenshots downloaded.`);
-      } else {
-        throw new Error(response?.error || 'Export failed');
-      }
-    } catch (error) {
-      console.error('Screenshot export failed:', error);
-      this.showNotification('Screenshot export failed', 'error');
-    }
-  }
 
   async exportSessionAsAudio(session) {
     try {
@@ -531,9 +433,9 @@ class SessionsManager {
     }
   }
 
-  async exportSessionAsZipPackage(session) {
+  async exportSessionAsBundle(session) {
     try {
-      this.showNotification('Creating ZIP package with markdown and screenshots...', 'info');
+      this.showNotification('Creating bundle with JSON, markdown and screenshots...', 'info');
       
       // Load the ZIP utility if not already loaded
       if (!window.SimpleZipCreator) {
@@ -547,9 +449,18 @@ class SessionsManager {
 
       if (response && response.success && response.zipData) {
         const zipData = response.zipData;
+        console.log('Bundle data received:', {
+          markdownLength: zipData.markdownContent?.length || 0,
+          screenshotCount: zipData.screenshots?.length || 0,
+          baseFilename: zipData.baseFilename
+        });
         
         // Create ZIP package
         const zip = new window.SimpleZipCreator();
+        
+        // Add JSON file
+        const sessionJson = JSON.stringify(zipData.sessionData, null, 2);
+        zip.addFile(`${zipData.baseFilename}.json`, sessionJson, true);
         
         // Add markdown file
         zip.addFile(zipData.markdownFilename, zipData.markdownContent, true);
@@ -573,13 +484,13 @@ class SessionsManager {
         document.body.removeChild(link);
         URL.revokeObjectURL(zipUrl);
         
-        this.showNotification(`ZIP package exported! Contains markdown + ${zipData.screenshots.length} screenshots.`);
+        this.showNotification(`Bundle exported! Contains JSON + markdown + ${zipData.screenshots.length} screenshots in ZIP package.`);
       } else {
         throw new Error(response?.error || 'ZIP export failed');
       }
     } catch (error) {
-      console.error('ZIP package export failed:', error);
-      this.showNotification('ZIP package export failed', 'error');
+      console.error('Bundle export failed:', error);
+      this.showNotification('Bundle export failed', 'error');
     }
   }
 

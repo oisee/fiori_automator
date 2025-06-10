@@ -3368,26 +3368,36 @@ class FioriTestBackground {
 
   async exportSessionAsZipPackage(sessionIdentifier) {
     try {
+      this.log('DEBUG: Exporting ZIP package for session:', sessionIdentifier);
+      
       // Get session data
       let sessionData;
       if (typeof sessionIdentifier === 'string') {
         // Session ID provided
         const allSessions = await this.getAllSessions();
         sessionData = allSessions[sessionIdentifier];
+        this.log('DEBUG: Found session from storage by ID:', !!sessionData);
       } else {
         // Tab ID provided
         sessionData = this.sessions.get(sessionIdentifier);
+        this.log('DEBUG: Found session from memory by tab ID:', !!sessionData);
       }
 
       if (!sessionData) {
+        this.logError('Session not found for identifier:', sessionIdentifier);
         throw new Error('Session not found');
       }
+      
+      this.log('DEBUG: Session has events:', sessionData.events?.length || 0);
 
       // Generate markdown content
       const markdownContent = await this.generateSessionMarkdown(sessionData);
       
       // Collect all screenshots referenced in the session
       const screenshotIds = this.collectScreenshotIds(sessionData);
+      this.log('DEBUG: Screenshot IDs found in session:', screenshotIds);
+      this.log('DEBUG: Total screenshots in memory:', this.screenshots.size);
+      
       const screenshots = [];
       
       for (const screenshotId of screenshotIds) {
@@ -3398,8 +3408,13 @@ class FioriTestBackground {
             filename: `${screenshotId}.png`,
             dataUrl: screenshot.dataUrl
           });
+          this.log('DEBUG: Found screenshot for ID:', screenshotId);
+        } else {
+          this.log('DEBUG: Missing screenshot for ID:', screenshotId);
         }
       }
+      
+      this.log('DEBUG: Total screenshots collected for ZIP:', screenshots.length);
 
       // Generate base filename
       const baseFilename = this.generateSemanticFilename(sessionData, '').replace('.', '');

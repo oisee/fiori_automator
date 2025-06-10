@@ -2,226 +2,217 @@
 
 🎯 **Intelligent test automation system for SAP Fiori applications with AI-powered analysis and OData correlation**
 
-## ✅ Current Status: All Critical Issues Resolved
+## ✅ Current Status: Fully Functional
 
-This extension is **fully functional** with all major issues fixed:
-- ✅ Service worker installation errors resolved
-- ✅ Event capture working properly  
-- ✅ Screenshot system with rate limiting implemented
-- ✅ Markdown export with mermaid diagrams
-- ✅ Clean filename format implemented
-- ✅ SAPUI5 detection enhanced
-- ✅ Request filtering for cleaner captures
+This extension is **production-ready** with all major issues resolved:
+- ✅ Service worker installation and manifest compliance
+- ✅ Event capture with proper synchronization  
+- ✅ Screenshot system with semantic filenames and rate limiting
+- ✅ Bundle export (JSON + Markdown + Screenshots in ZIP)
+- ✅ Clean semantic filename format across all exports
+- ✅ Enhanced SAPUI5/Fiori app detection
+- ✅ Request filtering for business-focused captures
+- ✅ Audio recording with voice narration support
+- ✅ Single source of truth for filename generation
 
-## Features
+---
+
+## 🚀 Quick Start
+
+### Installation
+1. Download or clone this repository
+2. Open Chrome and go to `chrome://extensions/`
+3. Enable "Developer mode"
+4. Click "Load unpacked" and select the project folder
+5. Pin the extension to your toolbar
+
+### Basic Usage
+1. **Navigate** to any SAP Fiori application
+2. **Click** the extension icon and select "Start Recording"
+3. **Interact** with the Fiori app (clicks, forms, navigation)
+4. **Stop** recording when finished
+5. **Export** your session as JSON or Bundle (recommended)
+
+---
+
+## 📋 Features
 
 ### Core Capabilities
 - **Universal Capture**: Records all user interactions (clicks, inputs, form submissions, drag & drop, file uploads)
 - **OData Correlation**: Automatically links UI actions with backend OData requests with confidence scoring
-- **SAPUI5 Context**: Deep extraction of Fiori app context and control metadata using 6 detection methods
-- **Screenshot Capture**: High-quality screenshots with semantic naming and rate limiting
-- **Real-time Analysis**: Live feedback during recording sessions with input coalescing
+- **SAPUI5 Context**: Deep extraction of Fiori app context and control metadata using multiple detection methods
+- **Screenshot Capture**: High-quality screenshots with semantic naming and rate limiting (max 2/second)
+- **Real-time Analysis**: Live feedback during recording sessions with intelligent input coalescing
 - **Session Management**: Save, export, and replay recorded sessions
 
 ### Advanced Features
 - **Network Request Interception**: Captures all HTTP requests with intelligent filtering
-- **Business Process Flow**: Clean mermaid diagrams showing meaningful operations
-- **Visual Documentation**: Screenshots embedded in markdown exports
+- **Business Process Flow**: Clean mermaid diagrams showing meaningful operations only
+- **Visual Documentation**: Screenshots automatically embedded in markdown exports
 - **Request Filtering**: Smart filtering of JS/CSS/assets to focus on business operations
-- **Semantic Filenames**: Clean, sortable filenames (`fs-YYYY-MM-DD-HHMM-session-name-EEEE-type.png`)
-- **Enterprise Ready**: Built for SAP environments with security best practices
+- **Semantic Filenames**: Clean, sortable filenames for all exports
+- **Audio Recording**: Optional voice narration during sessions
+- **Bundle Export**: Single ZIP containing JSON, Markdown, and all screenshots
+- **Enhanced App Detection**: Uses UI5 models, About Dialog, and Fiori Apps Library integration
 
-### Export Formats
+### Export Options
 
-#### **JSON Export** (`fs-YYYY-MM-DD-HHMM-session-name.json`)
-- Complete session data with sequence summaries
-- Screenshot references with semantic IDs
-- OData analysis and entity correlation
-- Source of truth for all session data
+#### 1. **Save JSON** - Session Data Only
+- File: `fs-YYYY-MM-DD-HHMM-app-name.json`
+- Complete session data with metadata
+- Application intelligence summary
+- Screenshot references
+- OData correlation analysis
 
-#### **Markdown Export** (`fs-YYYY-MM-DD-HHMM-session-name.md`)
-- Business process flow diagrams (mermaid)
-- Embedded screenshots with proper filenames
-- OData operations summary (modifying → functions → reads)
-- Clean event timeline with meaningful events only
+#### 2. **Save Bundle** - Complete Package (Recommended)
+- File: `fs-YYYY-MM-DD-HHMM-app-name.zip`
+- Contains: JSON + Markdown + All Screenshots
+- Ready for sharing and documentation
+- All files use consistent naming scheme
 
-#### **Screenshot Export** (`fs-YYYY-MM-DD-HHMM-session-name-EEEE-type.png`)
-- Individual PNG files with sequential IDs (0001, 0002, etc.)
-- Semantic naming for easy sorting and correlation
-- Rate-limited capture (2 per second max) to avoid browser restrictions
-
-## Installation
-
-### Quick Install
-1. **Download/Clone** this repository
-2. **Open Extensions**: Go to `chrome://extensions/` (or `edge://extensions/`)
-3. **Enable Developer Mode**: Toggle the developer mode switch
-4. **Load Extension**: Click "Load unpacked" and select this directory
-5. **Verify**: Extension icon should appear in toolbar without errors
-
-### Verify Installation
-- Extension loads without service worker errors
-- No red error messages in `chrome://extensions/`
-- Extension icon appears in browser toolbar
-- Can open popup without JavaScript errors
-
-## Quick Start
-
-### Basic Recording
-1. **Navigate** to your Fiori application
-2. **Click Extension Icon** to open popup
-3. **Configure Session**:
-   - Enter session name (optional)
-   - ✅ Capture screenshots
-   - ✅ Extract SAPUI5 context  
-   - ✅ Auto-correlate OData
-   - ✅ Filter JS/CSS/assets (recommended)
-4. **Click "Start Recording"** (red button)
-5. **Perform Actions** in the Fiori app
-6. **Click "Stop"** when finished
-7. **Export** using any format (JSON/Markdown/Screenshots)
-
-### Expected Results
-- Events captured in real-time (see counter in popup)
-- Screenshots taken for key interactions
-- Network requests correlated with user actions
-- Clean session export with business process visualization
-
-## File Output Examples
-
-```
-Session Export Results:
-📄 fs-2025-06-09-1424-manage-alerts.json     # Complete session data
-📄 fs-2025-06-09-1424-manage-alerts.md       # Visual documentation  
-🖼️ fs-2025-06-09-1424-manage-alerts-0001-click.png
-🖼️ fs-2025-06-09-1424-manage-alerts-0002-input.png
-🖼️ fs-2025-06-09-1424-manage-alerts-0003-submit.png
-```
-
-## Markdown Export Features
-
-### Business Process Flow
-```mermaid
-flowchart TD
-    Start([User starts session])
-    OP1[navigation: Manage Alerts]
-    OP2(read: Search Filter)
-    OP3{modify: Save Changes}
-    End([Session completed])
-    
-    OP2 -.-> GET[GET ComplianceAlerts]
-    OP3 -.-> MERGE[MERGE ComplianceAlert]
-```
-
-### OData Operations Summary
-- **🔄 Modifying Operations**: Shows entity, keys, and payload
-- **⚙️ Function Calls**: Lists function invocations with parameters  
-- **📖 Read Operations**: Grouped by entity with counts
-
-## Technical Architecture
-
-### Extension Components
-- **`background.js`**: Service worker handling network interception and session management
-- **`content.js`**: Page context script for DOM event capture and UI5 detection
-- **`popup.js`**: Extension popup UI and user interaction
-- **`injected.js`**: Deep page context access for enhanced UI5 inspection
-- **`ui5-detector.js`**: Advanced SAPUI5 application detection
-
-### Key Features
-- **Event Coalescing**: Input events are intelligently merged to reduce noise
-- **Rate Limiting**: Screenshot capture respects Chrome API limits (2/second)
-- **Smart Filtering**: Configurable filtering of static assets vs business requests
-- **Semantic Naming**: All files use consistent, sortable naming conventions
-- **Error Recovery**: Robust error handling with graceful degradation
-
-## Troubleshooting
-
-### Common Issues
-
-#### "Extension won't install"
-- **Cause**: Service worker syntax errors
-- **Solution**: All syntax errors have been fixed in current version
-
-#### "No events captured"
-- **Cause**: Content script not synchronized with recording state
-- **Solution**: Fixed in current version with proper state coordination
-
-#### "Screenshot quota exceeded"
-- **Cause**: Too many rapid screenshot requests
-- **Solution**: Rate limiting implemented (550ms between captures)
-
-#### "Markdown export fails"
-- **Cause**: Type errors in request body processing
-- **Solution**: Enhanced type checking implemented
-
-### Debug Tools
-
-1. **Extension Console**: Right-click extension icon → "Inspect popup"
-2. **Background Console**: Go to `chrome://extensions/` → "Service worker" link
-3. **Page Console**: F12 on Fiori page to see content script logs
-4. **Test Script**: Run `/test_event_capture.js` in browser console for diagnostics
-
-### Debug Commands
-```javascript
-// In browser console on Fiori page:
-window.fioriTestCaptureInstance?.isRecording  // Check recording state
-window.testRealClick()                       // Test event capture
-```
-
-## Development
-
-### Build Requirements
-- No build process required
-- Pure JavaScript Chrome Extension (Manifest V3)
-- Compatible with Chrome 88+, Edge 88+
-
-### File Structure
-```
-fiori_automator/
-├── manifest.json           # Extension manifest
-├── background.js           # Service worker
-├── content.js             # Content script
-├── popup.html/js/css      # Extension popup
-├── injected.js            # Page context script
-├── ui5-detector.js        # UI5 detection
-└── README.md              # This file
-```
-
-### Contributing
-1. **Test thoroughly** with various Fiori applications
-2. **Follow naming conventions** for consistency
-3. **Update documentation** for any new features
-4. **Verify cross-browser compatibility**
-
-## Advanced Usage
-
-### Session Analysis
-- **Business Process Documentation**: Use markdown exports for process documentation
-- **Performance Analysis**: Review network request timing and correlation
-- **Test Automation**: JSON exports can be used to generate automated tests
-- **Compliance Auditing**: Track user actions and system responses
-
-### Enterprise Integration
-- **CI/CD Integration**: Automated session capture in testing pipelines
-- **Documentation Generation**: Business process documentation from user sessions
-- **Training Materials**: Screenshot-rich documentation for user training
-- **Regression Testing**: Recorded sessions as test specifications
-
-## Support
-
-### Resources
-- **Testing Guide**: See `TESTING_GUIDE.md` for comprehensive testing instructions
-- **Technical Details**: See `UI5_DETECTION_IMPROVEMENTS.md` for deep technical information
-- **Examples**: See `EXAMPLE_CLEAN_MARKDOWN.md` for sample output
-
-### Getting Help
-1. **Check Console Logs**: Most issues show helpful error messages
-2. **Run Diagnostics**: Use the provided test scripts
-3. **Review Examples**: Compare your output with provided examples
-4. **Check Recent Fixes**: All major issues have been resolved in current version
+#### 3. **Export Audio** (if recorded)
+- File: `fs-YYYY-MM-DD-HHMM-app-name-audio.webm`
+- Voice narration recorded during session
+- Normal quality, opus codec
 
 ---
 
-**Version**: 2.0.0 (All Critical Issues Resolved)  
+## 🛠️ Technical Details
+
+### Architecture
+- **Manifest V3** Chrome extension with proper service worker
+- **Content Script**: Captures DOM events and UI5 context
+- **Background Script**: Manages sessions, screenshots, and exports
+- **Injected Scripts**: Deep access to page context and UI5 internals
+
+### Filename Format
+All exports use a consistent semantic naming pattern:
+```
+fs-YYYY-MM-DD-HHMM-app-name.{extension}
+```
+
+Examples:
+- `fs-2025-06-10-1430-manage-detection-methods.json`
+- `fs-2025-06-10-1430-manage-detection-methods.zip`
+- `fs-2025-06-10-1430-manage-detection-methods-0001-click.png`
+
+### Screenshot System
+- **Rate Limited**: Maximum 2 screenshots per second
+- **Semantic IDs**: Sequential numbering (0001, 0002, etc.)
+- **Event Correlation**: Each screenshot linked to specific user action
+- **Quality**: Full viewport capture with element highlighting
+
+### SAPUI5 Detection Methods
+1. **UI5 Model Data** (AppInfo, SysInfo JSONModels)
+2. **About Dialog** pattern detection
+3. **Direct API** access to `sap.ui.getCore()`
+4. **DOM Heuristics** for Fiori patterns
+5. **URL Analysis** for app component patterns
+6. **Fiori Apps Library** correlation
+
+---
+
+## 🧪 Testing & Debugging
+
+### Installation Verification
+1. Check extension loads without errors in `chrome://extensions/`
+2. Verify all files present: `manifest.json`, `background.js`, `content.js`, etc.
+3. Test popup interface opens correctly
+
+### Recording Test
+1. Navigate to any Fiori application
+2. Open browser DevTools Console
+3. Start recording and look for debug messages:
+   ```
+   [Fiori] Recording started - isRecording = true
+   [Fiori] Click captured and sent to background
+   ```
+
+### Export Test  
+1. Record a short session (2-3 clicks)
+2. Stop recording
+3. Open Sessions page and test "Save Bundle"
+4. Verify ZIP contains JSON + MD + PNG files
+
+### Debug Mode
+Enable debug logging:
+1. Open browser console
+2. Run: `localStorage.setItem('fiori-debug', 'true')`
+3. Reload page - you'll see detailed logging
+
+---
+
+## 📁 File Structure
+
+```
+fiori_automator/
+├── manifest.json           # Extension configuration
+├── popup.html/js/css       # Extension popup interface
+├── background.js           # Service worker (main logic)
+├── content.js             # Page interaction capture
+├── sessions.html/js/css    # Session management UI
+├── injected.js            # Deep page context access
+├── ui5-detector.js        # SAPUI5 detection engine
+├── zip-utils.js           # ZIP file creation utility
+├── icons/                 # Extension icons (16,32,48,128px)
+└── README.md              # This file
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**Extension won't install**
+- Check Chrome version (requires Manifest V3 support)
+- Ensure all files present in directory
+- Check for syntax errors in manifest.json
+
+**No events captured**
+- Verify content script loaded (check console)
+- Check if page has CSP restrictions
+- Enable debug mode for detailed logging
+
+**Screenshots not working**
+- Check chrome.tabs permission in manifest
+- Verify tab is active and visible
+- Check rate limiting (max 2/second)
+
+**Bundle export empty**
+- Check if session has events
+- Verify screenshots were captured during recording
+- Enable debug logging to see screenshot collection
+
+### Support
+For issues or questions:
+1. Enable debug mode and check console logs
+2. Check the Sessions page for detailed session data
+3. Verify all extension files are present and loaded
+
+---
+
+## 🔧 Development
+
+### Building from Source
+1. Clone repository
+2. No build step required - load directly as unpacked extension
+3. Modify files and reload extension to test changes
+
+### Key Files to Modify
+- `background.js` - Core logic, session management, exports
+- `content.js` - Event capture, UI5 detection
+- `popup.js` - User interface logic
+- `sessions.js` - Session viewer and export interface
+
+### Testing Changes
+1. Make modifications
+2. Go to `chrome://extensions/`
+3. Click reload button for the extension
+4. Test functionality in Fiori applications
+
+---
+
+**Version**: 1.1 (Production Ready)  
 **Last Updated**: June 2025  
-**Compatibility**: Chrome 88+, Edge 88+, Manifest V3
+**Chrome Manifest**: V3 Compatible
