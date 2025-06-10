@@ -70,6 +70,10 @@ class SessionsManager {
       this.exportSessionAsAudio(this.selectedSession);
     });
 
+    document.getElementById('modalExportZipPackageBtn').addEventListener('click', () => {
+      this.exportSessionAsZipPackage(this.selectedSession);
+    });
+
     document.getElementById('modalReplayBtn').addEventListener('click', () => {
       this.replaySession(this.selectedSession);
     });
@@ -458,6 +462,80 @@ class SessionsManager {
       console.error('Audio export failed:', error);
       this.showNotification('Audio export failed', 'error');
     }
+  }
+
+  async exportSessionAsZipPackage(session) {
+    try {
+      this.showNotification('Creating ZIP package with markdown and screenshots...', 'info');
+      
+      // Load the ZIP utility if not already loaded
+      if (!window.SimpleZipCreator) {
+        await this.loadZipUtility();
+      }
+      
+      const response = await chrome.runtime.sendMessage({
+        type: 'export-session-zip',
+        sessionId: session.sessionId
+      });
+
+      if (response && response.success && response.zipData) {
+        const zipData = response.zipData;
+        
+        // Create ZIP package
+        const zip = new window.SimpleZipCreator();
+        
+        // Add markdown file
+        zip.addFile(zipData.markdownFilename, zipData.markdownContent, true);
+        
+        // Add all screenshots
+        for (const screenshot of zipData.screenshots) {
+          zip.addFile(screenshot.filename, screenshot.dataUrl, false);
+        }
+        
+        // Generate ZIP file
+        const zipBytes = zip.generateZip();
+        const zipBlob = new Blob([zipBytes], { type: 'application/zip' });
+        const zipUrl = URL.createObjectURL(zipBlob);
+        
+        // Download ZIP file
+        const link = document.createElement('a');
+        link.href = zipUrl;
+        link.download = `${zipData.baseFilename}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(zipUrl);
+        
+        this.showNotification(`ZIP package exported! Contains markdown + ${zipData.screenshots.length} screenshots.`);
+      } else {
+        throw new Error(response?.error || 'ZIP export failed');
+      }
+    } catch (error) {
+      console.error('ZIP package export failed:', error);
+      this.showNotification('ZIP package export failed', 'error');
+    }
+  }
+
+  async loadZipUtility() {
+    return new Promise((resolve, reject) => {
+      if (window.SimpleZipCreator) {
+        resolve();
+        return;
+      }
+      
+      const script = document.createElement('script');
+      script.src = chrome.runtime.getURL('zip-utils.js');
+      script.onload = () => {
+        console.log('ZIP utility loaded successfully');
+        resolve();
+      };
+      script.onerror = () => {
+        console.error('Failed to load ZIP utility');
+        reject(new Error('Failed to load ZIP utility'));
+      };
+      
+      document.head.appendChild(script);
+    });
   }
 
   async exportAllSessions() {

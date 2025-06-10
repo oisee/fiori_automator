@@ -41,7 +41,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["injected.js", "ui5-detector.js"],
+      "resources": ["injected.js", "ui5-detector.js", "zip-utils.js"],
       "matches": ["<all_urls>"]
     }
   ]

@@ -491,6 +491,15 @@ class FioriTestBackground {
           break;
         }
 
+        case 'export-session-zip': {
+          const zipResult = await this.exportSessionAsZipPackage(message.sessionId || sender.tab?.id || message.tabId);
+          sendResponse({ 
+            success: true, 
+            zipData: zipResult
+          });
+          break;
+        }
+
         default:
           sendResponse({ success: false, error: 'Unknown message type' });
       }
@@ -2995,6 +3004,60 @@ class FioriTestBackground {
       };
     } catch (error) {
       this.logError('Failed to export session audio:', error);
+      throw error;
+    }
+  }
+
+  async exportSessionAsZipPackage(sessionIdentifier) {
+    try {
+      // Get session data
+      let sessionData;
+      if (typeof sessionIdentifier === 'string') {
+        // Session ID provided
+        const allSessions = await this.getAllSessions();
+        sessionData = allSessions[sessionIdentifier];
+      } else {
+        // Tab ID provided
+        sessionData = this.sessions.get(sessionIdentifier);
+      }
+
+      if (!sessionData) {
+        throw new Error('Session not found');
+      }
+
+      // Generate markdown content
+      const markdownContent = await this.generateSessionMarkdown(sessionData);
+      
+      // Collect all screenshots referenced in the session
+      const screenshotIds = this.collectScreenshotIds(sessionData);
+      const screenshots = [];
+      
+      for (const screenshotId of screenshotIds) {
+        const screenshot = this.screenshots.get(screenshotId);
+        if (screenshot) {
+          screenshots.push({
+            id: screenshotId,
+            filename: `${screenshotId}.png`,
+            dataUrl: screenshot.dataUrl
+          });
+        }
+      }
+
+      // Generate base filename
+      const baseFilename = this.generateSemanticFilename(sessionData, '').replace('.', '');
+      
+      // Create file manifest for ZIP creation
+      const zipManifest = {
+        markdownFilename: `${baseFilename}.md`,
+        markdownContent: markdownContent,
+        screenshots: screenshots,
+        baseFilename: baseFilename,
+        sessionData: sessionData
+      };
+
+      return zipManifest;
+    } catch (error) {
+      this.logError('Failed to export session as ZIP package:', error);
       throw error;
     }
   }
