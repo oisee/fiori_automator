@@ -60,17 +60,27 @@ This extension captures the patterns needed to build the ultimate solution: an M
 4. **Stop** recording when finished
 5. **Export** your session as JSON or Bundle (recommended)
 
+### What to Capture (For Maximum Impact)
+Focus on capturing sessions that show:
+- **Repetitive tasks** you do daily (these are prime automation candidates)
+- **Multi-step processes** that should be simple (expose the UI complexity)
+- **Data updates** that require navigating through multiple screens
+- **Search and filter operations** that could be natural language queries
+- **Any workflow where you think** "there must be a better way"
+
+Each captured session helps map the OData services behind the UI curtain.
+
 ---
 
 ## 📋 Features
 
-### Core Capabilities
-- **Universal Capture**: Records all user interactions (clicks, inputs, form submissions, drag & drop, file uploads)
-- **OData Correlation**: Automatically links UI actions with backend OData requests with confidence scoring
-- **SAPUI5 Context**: Deep extraction of Fiori app context and control metadata using multiple detection methods
-- **Screenshot Capture**: High-quality screenshots with semantic naming and rate limiting (max 2/second)
-- **Real-time Analysis**: Live feedback during recording sessions with intelligent input coalescing
-- **Session Management**: Save, export, and replay recorded sessions
+### Core Capabilities (Building Blocks for UI Elimination)
+- **Universal Capture**: Records all user interactions to understand how humans navigate the UI maze
+- **OData Correlation**: The key insight - every UI action eventually triggers OData calls (this is what we'll use directly)
+- **SAPUI5 Context**: Extracts the business logic hidden behind @UI annotations and control hierarchies
+- **Screenshot Capture**: Documents the visual overhead we're about to eliminate
+- **Real-time Analysis**: Shows exactly how much time is wasted on UI navigation
+- **Session Management**: Build a library of patterns for direct OData access
 
 ### Advanced Features
 - **Network Request Interception**: Captures all HTTP requests with intelligent filtering
@@ -240,6 +250,30 @@ For issues or questions:
 
 ---
 
-**Version**: 1.1 (Production Ready)  
+## 🔮 The Endgame: Life After Fiori
+
+When this project succeeds, here's what changes:
+
+### Before (Fiori Way)
+```
+User: "Update purchase order 4500123456 delivery date to next Friday"
+Steps: Open Fiori → Find App → Click Tile → Wait → Search PO → Click Edit → 
+       Change Date → Save → Confirm → Close
+Time: 4 minutes, 23 clicks
+```
+
+### After (Direct OData)
+```
+User: "Update purchase order 4500123456 delivery date to next Friday"
+AI: Done. Delivery date updated to July 3, 2025.
+Time: 2 seconds, 0 clicks
+```
+
+The extension you're using today is capturing the data to make this future possible. Every session recorded brings us closer to eliminating the 80% waste in enterprise software.
+
+---
+
+**Version**: 1.1 (The UI Killer)  
 **Last Updated**: June 2025  
-**Chrome Manifest**: V3 Compatible
+**Chrome Manifest**: V3 Compatible  
+**Next Phase**: MCP-OData Bridge (Coming Soon)
