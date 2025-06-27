@@ -8,7 +8,7 @@
 
 Article:
  - [I killed Fiori](https://www.linkedin.com/pulse/i-killed-fiori-id-do-again-alice-vinogradova-tbnjc/)
- - [I killed Fiori](I Killed Fiori.md)
+ - [I killed Fiori](I%20Killed%20Fiori.md)
 
 
 This extension is the first phase in eliminating the Fiori UI layer entirely. By capturing every interaction, UI5 context, and OData request, we're building the foundation for direct AI-to-OData communication. 
