@@ -52,11 +52,72 @@ This extension captures the patterns needed to build the ultimate solution: an M
 ## 🚀 Quick Start
 
 ### Installation
-1. Download or clone this repository
-2. Open Chrome and go to `chrome://extensions/`
-3. Enable "Developer mode"
-4. Click "Load unpacked" and select the project folder
-5. Pin the extension to your toolbar
+
+#### Method 1: Load from Folder (Chrome & Edge)
+
+**Chrome:**
+1. Download or clone this repository to a local folder
+2. Open Chrome and navigate to `chrome://extensions/`
+3. Enable "Developer mode" toggle in the top right corner
+4. Click "Load unpacked" button
+5. Browse and select the `fiori_automator` folder
+6. The extension will appear in your extensions list
+7. Click the puzzle piece icon in toolbar and pin the extension
+
+**Edge:**
+1. Download or clone this repository to a local folder
+2. Open Edge and navigate to `edge://extensions/`
+3. Enable "Developer mode" toggle in the left sidebar
+4. Click "Load unpacked" button
+5. Browse and select the `fiori_automator` folder
+6. The extension will appear in your extensions list
+7. Click the extensions icon in toolbar and pin the extension
+
+#### Method 2: Pack as CRX (For Distribution)
+
+**Create CRX file:**
+1. In Chrome, go to `chrome://extensions/`
+2. Enable "Developer mode"
+3. Click "Pack extension" button
+4. Browse to the extension directory
+5. Leave private key field empty (first time) or use existing key
+6. Click "Pack Extension" to generate .crx file
+
+**Install CRX file:**
+- **Chrome**: Drag and drop the .crx file onto `chrome://extensions/` page
+- **Edge**: Drag and drop the .crx file onto `edge://extensions/` page
+- Note: Recent versions may require additional permissions for CRX installation
+
+#### Method 3: From ZIP Archive
+
+1. Download the extension as a ZIP file
+2. Extract the ZIP to a folder on your computer
+3. Follow Method 1 instructions to load the unpacked extension
+
+#### Method 4: Firefox (Requires Manifest V2 Conversion)
+
+This extension uses Chrome's Manifest V3 format. To use in Firefox:
+1. Convert manifest.json to Manifest V2 format
+2. Load as temporary extension via `about:debugging`
+3. Note: Some features may require adaptation for Firefox APIs
+
+#### Browser Compatibility
+
+| Browser | Support | Notes |
+|---------|---------|-------|
+| Chrome | ✅ Full | Version 88+ required for Manifest V3 |
+| Edge | ✅ Full | Version 88+ required for Manifest V3 |
+| Brave | ✅ Full | Same as Chrome |
+| Opera | ✅ Full | Same as Chrome |
+| Firefox | ⚠️ Partial | Requires Manifest V2 conversion |
+| Safari | ❌ No | Different extension format |
+
+#### Post-Installation Steps
+
+1. **Verify Installation**: Check that the extension icon appears in your toolbar
+2. **Grant Permissions**: The extension may request permissions when first used
+3. **Pin Extension**: For easy access, pin the extension to your toolbar
+4. **Test Recording**: Navigate to a Fiori app and test the recording feature
 
 ### Basic Usage
 1. **Navigate** to any SAP Fiori application
