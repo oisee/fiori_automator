@@ -7,7 +7,7 @@
 ## 🚀 The Vision: From 23 Clicks to Zero
 
 Article:
- - [I killed Fiori](https://www.linkedin.com/pulse/i-killed-fiori-id-do-again-alice-vinogradova-tbnjc/)
+ - [I killed Fiori](https://www.linkedin.com/pulse/i-killed-fiori-id-do-again-alice-vinogradova-tbnjc/) (ext)
  - [I killed Fiori](I%20Killed%20Fiori.md)
 
 
