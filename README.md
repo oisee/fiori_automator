@@ -166,6 +166,8 @@ Each captured session helps map the OData services behind the UI curtain.
 - Application intelligence summary
 - Screenshot references
 - OData correlation analysis
+- Requests include `batchParts` (method, URL, headers, body, changeset), and cut bodies include `truncated`, `originalLength` and `keptLength` metadata.
+- Events retain UI5 `controlId` and `bindingInfo`; linked requests carry `correlation` (`bound`, `sequence` or `tentative`).
 
 #### 2. **Save Bundle** - Complete Package (Recommended)
 - File: `fs-YYYY-MM-DD-HHMM-app-name.zip`

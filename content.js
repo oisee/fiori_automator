@@ -1,4 +1,5 @@
 // Content script for Fiori Test Automation System
+const FIORI_RESPONSE_BODY_LIMIT = 1024 * 1024;
 // Captures DOM interactions, SAPUI5 context, and coordinates with background script
 
 // Only declare the class if it doesn't already exist
@@ -131,7 +132,7 @@ if (!window.FioriTestCapture) {
       const startTime = Date.now();
       const [resource, config] = args;
       const url = typeof resource === 'string' ? resource : resource.url;
-      const method = config?.method || 'GET';
+      const method = config?.method || resource?.method || 'GET';
 
       try {
         const response = await this.originalFetch.apply(window, args);
@@ -141,7 +142,7 @@ if (!window.FioriTestCapture) {
         
         // Capture response body for relevant requests
         if (this.isRelevantForCapture(url, method)) {
-          this.captureResponseBody(url, method, responseClone, startTime);
+          this.captureResponseBody(new URL(url, window.location.href).href, method, responseClone, startTime);
         }
         
         return response;
@@ -156,7 +157,7 @@ if (!window.FioriTestCapture) {
     const originalSend = this.originalXMLHttpRequest.prototype.send;
     
     this.originalXMLHttpRequest.prototype.open = function(method, url, ...args) {
-      this._fioriRequestData = { method, url, startTime: Date.now() };
+      this._fioriRequestData = { method, url: new URL(url, window.location.href).href, startTime: Date.now() };
       return originalOpen.call(this, method, url, ...args);
     };
     
@@ -165,17 +166,17 @@ if (!window.FioriTestCapture) {
       
       this.addEventListener('loadend', function() {
         if (this._fioriRequestData && self?.isRelevantForCapture(this._fioriRequestData.url, this._fioriRequestData.method)) {
+          const captured = FioriResponseCapture.summarizeXhr(this, FIORI_RESPONSE_BODY_LIMIT);
           const responseData = {
             url: this._fioriRequestData.url,
             method: this._fioriRequestData.method,
             status: this.status,
             statusText: this.statusText,
-            responseText: this.responseText,
-            responseHeaders: this.getAllResponseHeaders(),
+            ...captured,
             startTime: this._fioriRequestData.startTime,
             endTime: Date.now()
           };
-          
+
           self.sendCapturedResponse(responseData);
         }
       });
@@ -190,6 +191,7 @@ if (!window.FioriTestCapture) {
     try {
       const contentType = response.headers.get('content-type') || '';
       let responseData = null;
+      let truncation = {};
 
       // Only capture text-based responses to avoid large binary data
       if (contentType.includes('application/json') ||
@@ -197,11 +199,11 @@ if (!window.FioriTestCapture) {
           contentType.includes('application/xml') ||
           contentType.includes('application/atom+xml')) {
         
-        responseData = await response.text();
-        
-        // Limit response size to 50KB to avoid memory issues
-        if (responseData.length > 50000) {
-          responseData = responseData.substring(0, 50000) + '...[truncated]';
+        const captured = await FioriResponseCapture.readLimitedText(response, FIORI_RESPONSE_BODY_LIMIT);
+        responseData = captured.responseData;
+        if (captured.truncated) {
+          truncation = { truncated: true, originalLength: captured.originalLength,
+            keptLength: captured.keptLength };
         }
       }
 
@@ -212,6 +214,7 @@ if (!window.FioriTestCapture) {
         statusText: response.statusText,
         headers: Object.fromEntries(response.headers.entries()),
         responseData,
+        ...truncation,
         contentType,
         startTime,
         endTime: Date.now(),
@@ -320,6 +323,7 @@ if (!window.FioriTestCapture) {
   }
 
   async captureClickEvent(event) {
+    const interactionTime = Date.now();
     console.log('[Fiori] captureClickEvent called - isRecording:', this.isRecording);
     
     if (!this.isRecording) {
@@ -334,6 +338,7 @@ if (!window.FioriTestCapture) {
     
     const eventData = {
       type: 'click',
+      timestamp: interactionTime,
       coordinates: {
         x: event.clientX,
         y: event.clientY,
@@ -364,6 +369,7 @@ if (!window.FioriTestCapture) {
   }
 
   async captureInputEvent(event) {
+    const interactionTime = Date.now();
     const element = event.target;
     
     // Capture screenshot for input events
@@ -371,6 +377,7 @@ if (!window.FioriTestCapture) {
     
     const eventData = {
       type: 'input',
+      timestamp: interactionTime,
       element: await this.getElementInfo(element),
       value: element.value,
       inputType: event.inputType,

@@ -1,3 +1,5 @@
+importScripts('export-logic.js');
+
 // Background script for Fiori Test Automation System
 // Handles network request interception, storage management, and session coordination
 
@@ -6,6 +8,8 @@ class FioriTestBackground {
     this.sessions = new Map();
     this.networkRequests = new Map();
     this.capturedResponses = new Map(); // Store captured response bodies by URL and timestamp
+    this.stoppingSaves = new Map();
+    this.captureWriteQueue = Promise.resolve();
     this.screenshots = new Map(); // Store screenshots by ID
     this.audioRecordings = new Map(); // Store audio recordings by session ID
     this.debug = false;
@@ -181,21 +185,27 @@ class FioriTestBackground {
     const responseKey = this.generateResponseKey(requestData.url, requestData.timestamp);
     const capturedResponse = this.capturedResponses.get(responseKey);
     
-    if (capturedResponse) {
+    if (capturedResponse && capturedResponse.method?.toUpperCase() === requestData.method?.toUpperCase()) {
       this.log('Found captured response for request:', requestData.url);
       return {
         captured: true,
         data: capturedResponse.responseData,
         contentType: capturedResponse.contentType,
         status: capturedResponse.status,
-        headers: capturedResponse.headers
+        headers: capturedResponse.headers,
+        truncated: capturedResponse.truncated,
+        originalLength: capturedResponse.originalLength,
+        keptLength: capturedResponse.keptLength,
+        responseType: capturedResponse.responseType,
+        byteLength: capturedResponse.byteLength
       };
     }
 
     // Try to find response by URL matching within a time window (±5 seconds)
     const timeWindow = 5000;
     for (const [key, response] of this.capturedResponses.entries()) {
-      if (response.url === requestData.url && 
+      if (response.method?.toUpperCase() === requestData.method?.toUpperCase() &&
+          new URL(response.url, requestData.url).href === requestData.url &&
           Math.abs(response.startTime - requestData.timestamp) < timeWindow) {
         this.log('Found captured response by time matching for:', requestData.url);
         return {
@@ -203,7 +213,12 @@ class FioriTestBackground {
           data: response.responseData,
           contentType: response.contentType,
           status: response.status,
-          headers: response.headers
+          headers: response.headers,
+          truncated: response.truncated,
+          originalLength: response.originalLength,
+          keptLength: response.keptLength,
+          responseType: response.responseType,
+          byteLength: response.byteLength
         };
       }
     }
@@ -214,17 +229,40 @@ class FioriTestBackground {
     };
   }
 
-  handleCapturedResponse(responseData, tabId) {
+  async handleCapturedResponse(responseData, tabId) {
     const responseKey = this.generateResponseKey(responseData.url, responseData.startTime);
     
     // Store the captured response
     this.capturedResponses.set(responseKey, responseData);
     
-    // Clean up old responses (keep only last 100)
-    if (this.capturedResponses.size > 100) {
+    // Bound retained response bodies to about 10 MiB.
+    if (this.capturedResponses.size > 10) {
       const keys = Array.from(this.capturedResponses.keys());
-      const toDelete = keys.slice(0, keys.length - 100);
+      const toDelete = keys.slice(0, keys.length - 10);
       toDelete.forEach(key => this.capturedResponses.delete(key));
+    }
+
+    const session = this.sessions.get(tabId);
+    const activeSession = session?.isRecording && responseData.startTime >= session.startTime;
+    if (activeSession) {
+      FioriExportLogic.reconcileCapturedResponse(session, responseData, tabId);
+    }
+
+    if (!activeSession) {
+      this.captureWriteQueue = this.captureWriteQueue.catch(() => {}).then(async () => {
+        await this.stoppingSaves.get(tabId);
+        const result = await chrome.storage.local.get(['fioriSessions']);
+        const sessions = result.fioriSessions || {};
+        const saved = Object.values(sessions).filter(item =>
+          item.tabId === tabId && !item.isRecording &&
+          responseData.startTime >= item.startTime && responseData.startTime <= item.endTime)
+          .sort((a, b) => b.startTime - a.startTime)[0];
+        if (saved && FioriExportLogic.reconcileCapturedResponse(saved, responseData, tabId)) {
+          sessions[saved.sessionId] = saved;
+          await chrome.storage.local.set({ fioriSessions: sessions });
+        }
+      });
+      await this.captureWriteQueue;
     }
 
     this.log('Captured response for:', responseData.url, 'Status:', responseData.status);
@@ -473,87 +511,10 @@ class FioriTestBackground {
   }
 
   unwrapBatchRequest(requestBody) {
-    if (!requestBody || typeof requestBody !== 'string') {
-      return [];
-    }
-
-    const operations = [];
-    
-    try {
-      // Parse multipart/mixed batch format
-      const lines = requestBody.split('\n');
-      let currentOperation = null;
-      let inRequestHeaders = false;
-      let inRequestBody = false;
-      
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        
-        // Detect batch boundary
-        if (line.startsWith('--batch_') || line.startsWith('--changeset_')) {
-          if (currentOperation) {
-            operations.push(currentOperation);
-          }
-          currentOperation = {
-            type: 'unknown',
-            method: null,
-            url: null,
-            headers: {},
-            body: null
-          };
-          inRequestHeaders = false;
-          inRequestBody = false;
-          continue;
-        }
-        
-        // Parse HTTP request line (e.g., "GET EntitySet HTTP/1.1")
-        if (line.match(/^(GET|POST|PUT|PATCH|DELETE|MERGE)\s+/)) {
-          const match = line.match(/^(\w+)\s+([^\s]+)/);
-          if (match && currentOperation) {
-            currentOperation.method = match[1];
-            currentOperation.url = match[2];
-            currentOperation.type = this.classifyBatchOperation(match[1], match[2]);
-            inRequestHeaders = true;
-            inRequestBody = false;
-          }
-          continue;
-        }
-        
-        // Parse headers
-        if (inRequestHeaders && line.includes(':')) {
-          const [key, ...valueParts] = line.split(':');
-          if (currentOperation) {
-            currentOperation.headers[key.trim()] = valueParts.join(':').trim();
-          }
-          continue;
-        }
-        
-        // Empty line indicates end of headers, start of body
-        if (inRequestHeaders && line === '') {
-          inRequestHeaders = false;
-          inRequestBody = true;
-          continue;
-        }
-        
-        // Collect request body
-        if (inRequestBody && line && currentOperation) {
-          if (!currentOperation.body) {
-            currentOperation.body = '';
-          }
-          currentOperation.body += line + '\n';
-        }
-      }
-      
-      // Add the last operation
-      if (currentOperation) {
-        operations.push(currentOperation);
-      }
-      
-    } catch (error) {
-      this.log('Error unwrapping batch request:', error);
-    }
-    
-    return operations.filter(op => op.method && op.url);
+    return FioriExportLogic.parseBatch(requestBody).map(part => ({
+      ...part,
+      type: this.classifyBatchOperation(part.method, part.url)
+    }));
   }
 
   classifyBatchOperation(method, url) {
@@ -611,6 +572,7 @@ class FioriTestBackground {
       // Clean the request data before adding
       const cleanedRequest = this.cleanNetworkData(requestData);
       session.networkRequests.push(cleanedRequest);
+      this.correlateNetworkRequests(null, session);
       
       this.log(`Network request added to session: ${requestData.method} ${requestData.url}`);
       
@@ -784,7 +746,7 @@ class FioriTestBackground {
         }
 
         case 'response-captured': {
-          this.handleCapturedResponse(message.data, sender.tab?.id);
+          await this.handleCapturedResponse(message.data, sender.tab?.id);
           sendResponse({ success: true });
           break;
         }
@@ -878,7 +840,13 @@ class FioriTestBackground {
       await this.notifyContentScript(tabId, 'stop-recording');
 
       // Save session to storage (now includes audio data)
-      await this.saveSession(session);
+      const savePromise = this.saveSession(session);
+      this.stoppingSaves.set(tabId, savePromise);
+      try {
+        await savePromise;
+      } finally {
+        this.stoppingSaves.delete(tabId);
+      }
       
       // Broadcast state change
       this.broadcastStateChange(tabId, 'stopped');
@@ -1763,11 +1731,7 @@ class FioriTestBackground {
           selector: event.element.selector,
           xpath: event.element.xpath
         } : null,
-        ui5Context: event.ui5Context ? {
-          controlType: event.ui5Context.controlType,
-          controlId: event.ui5Context.controlId,
-          properties: event.ui5Context.properties
-        } : null,
+        ui5Context: FioriExportLogic.cleanUI5Context(event.ui5Context),
         value: event.value,
         key: event.key,
         correlatedRequests: event.correlatedRequests?.map(req => ({
@@ -1826,6 +1790,7 @@ class FioriTestBackground {
         requestHeaders: this.cleanHeaders(request.requestHeaders),
         responseHeaders: this.cleanHeaders(request.responseHeaders),
         requestBody: this.cleanBody(request.requestBody),
+        batchParts: FioriExportLogic.cleanBatchParts(request.batchOperations || request.batchParts),
         responseBody: this.cleanBody(request.responseBody),
         correlation: request.correlation
       };
@@ -1856,146 +1821,24 @@ class FioriTestBackground {
   }
 
   cleanBody(body) {
-    if (!body) return null;
-    
     try {
-      // If it's already an object, stringify and limit size
-      if (typeof body === 'object') {
-        const jsonString = JSON.stringify(body);
-        return jsonString.length > 10000 ? jsonString.substring(0, 10000) + '...[truncated]' : body;
-      }
-      
-      // If it's a string, limit size
-      if (typeof body === 'string') {
-        return body.length > 10000 ? body.substring(0, 10000) + '...[truncated]' : body;
-      }
-      
-      return body;
+      return FioriExportLogic.cleanBody(body);
     } catch (error) {
       return '[Error serializing body]';
     }
   }
 
   correlateNetworkRequests(event, session) {
-    const correlationWindow = 10000; // Increased to 10 seconds for better causation detection
-    const eventTime = event.timestamp;
-    
-    // Find network requests within correlation window (before and after event)
-    const correlatedRequests = [];
-    
-    for (const [requestId, requestData] of this.networkRequests) {
-      if (requestData.tabId === session.tabId) {
-        const timeDiff = requestData.timestamp - eventTime; // Allow negative (requests after clicks)
-        const absTimeDiff = Math.abs(timeDiff);
-        
-        if (absTimeDiff <= correlationWindow) {
-          // Enhanced confidence calculation considering causation patterns
-          let confidence = Math.max(0, 100 - (absTimeDiff / correlationWindow * 40));
-          
-          // Boost confidence for likely causation patterns
-          if (this.isLikelyCausationPattern(event, requestData, timeDiff)) {
-            confidence = Math.min(95, confidence + 25);
-          }
-          
-          // Reduce confidence for requests that happened before the click (unlikely causation)
-          if (timeDiff < 0) {
-            confidence = confidence * 0.7;
-          }
-          
-          correlatedRequests.push({
-            ...requestData,
-            correlation: {
-              confidence: Math.round(confidence * 100) / 100,
-              timeDifference: absTimeDiff,
-              causationDirection: timeDiff >= 0 ? 'after-click' : 'before-click',
-              pattern: this.detectCausationPattern(event, requestData)
-            }
-          });
-        }
-      }
+    const matches = FioriExportLogic.correlateTimeline(
+      session.events || [], session.networkRequests || [], session.tabId
+    );
+    for (const recordedEvent of session.events || []) {
+      recordedEvent.correlatedRequests = matches.get(recordedEvent.eventId) || [];
     }
-
-    // Sort by confidence and time proximity
-    correlatedRequests.sort((a, b) => {
-      if (Math.abs(a.correlation.confidence - b.correlation.confidence) < 5) {
-        return a.correlation.timeDifference - b.correlation.timeDifference;
-      }
-      return b.correlation.confidence - a.correlation.confidence;
-    });
-
-    if (correlatedRequests.length > 0) {
-      event.correlatedRequests = correlatedRequests;
+    for (const request of session.networkRequests || []) {
+      const match = [...matches.values()].flat().find(item => item.requestId === request.requestId);
+      request.correlation = match?.correlation;
     }
-  }
-
-  isLikelyCausationPattern(event, requestData, timeDiff) {
-    // Pattern 1: Button clicks followed by OData requests
-    if (event.element?.tagName === 'BUTTON' || 
-        event.element?.className?.includes('Btn') ||
-        event.element?.id?.includes('Button') ||
-        event.element?.id?.includes('Btn')) {
-      if (timeDiff >= 0 && timeDiff <= 3000 && requestData.type?.includes('odata')) {
-        return true;
-      }
-    }
-
-    // Pattern 2: "Go" button specifically
-    if (event.element?.textContent?.includes('Go') || 
-        event.element?.id?.includes('btnGo')) {
-      if (timeDiff >= 0 && timeDiff <= 5000 && requestData.type?.includes('odata')) {
-        return true;
-      }
-    }
-
-    // Pattern 3: Assign button specifically
-    if (event.element?.textContent?.includes('Assign') || 
-        event.element?.id?.includes('assign') ||
-        event.element?.id?.includes('Assign')) {
-      const bodyString = typeof requestData.requestBody === 'string' ? requestData.requestBody : 
-                        (requestData.requestBody ? JSON.stringify(requestData.requestBody) : '');
-      if (timeDiff >= 0 && timeDiff <= 3000 && 
-          (bodyString.includes('SetMeAsResponsiblePerson') ||
-           requestData.url?.includes('SetMeAsResponsiblePerson'))) {
-        return true;
-      }
-    }
-
-    // Pattern 4: Link clicks followed by detail requests
-    if (event.element?.tagName === 'A' || event.element?.className?.includes('Link')) {
-      if (timeDiff >= 0 && timeDiff <= 4000 && requestData.type?.includes('odata')) {
-        return true;
-      }
-    }
-
-    // Pattern 5: Filter selection followed by data requests
-    if (event.element?.id?.includes('filter') || 
-        event.element?.id?.includes('Filter') ||
-        event.element?.className?.includes('Filter')) {
-      if (timeDiff >= 0 && timeDiff <= 4000 && requestData.type?.includes('odata')) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  detectCausationPattern(event, requestData) {
-    if (event.element?.textContent?.includes('Go')) {
-      return 'filter-execution';
-    }
-    if (event.element?.textContent?.includes('Assign')) {
-      return 'assignment-action';
-    }
-    if (event.element?.tagName === 'A') {
-      return 'navigation-action';
-    }
-    if (event.element?.id?.includes('filter')) {
-      return 'filter-selection';
-    }
-    if (requestData.type?.includes('odata-batch')) {
-      return 'data-retrieval';
-    }
-    return 'generic-interaction';
   }
 
   async saveSession(session) {
@@ -2639,7 +2482,7 @@ class FioriTestBackground {
                   eventId: event.eventId,
                   entity,
                   operation: req.method,
-                  confidence: req.correlation.confidence
+                  correlation: req.correlation
                 });
               }
             }
@@ -3292,8 +3135,7 @@ class FioriTestBackground {
           markdown += `\n**Correlated Network Requests:**\n\n`;
           event.correlatedRequests.forEach(req => {
             markdown += `- **${req.method}** ${req.url.split('/').pop()}\n`;
-            markdown += `  - Confidence: ${Math.round(req.correlation.confidence)}%\n`;
-            markdown += `  - Time difference: ${req.correlation.timeDifference}ms\n`;
+            markdown += `  - Correlation: ${req.correlation}\n`;
           });
         }
         
@@ -3386,7 +3228,7 @@ class FioriTestBackground {
       if (sequenceSummary.odataOperations.length > 0) {
         markdown += `### OData Operations Details\n\n`;
         sequenceSummary.odataOperations.forEach((op, index) => {
-          markdown += `${index + 1}. **Event ${op.eventId}**: ${op.operation} on ${op.entity} (${op.confidence}% confidence)\n`;
+          markdown += `${index + 1}. **Event ${op.eventId}**: ${op.operation} on ${op.entity} (${op.correlation} correlation)\n`;
         });
         markdown += `\n`;
       }
@@ -4314,4 +4156,3 @@ class FioriTestBackground {
 
 // Initialize background script
 const backgroundInstance = new FioriTestBackground();
-
