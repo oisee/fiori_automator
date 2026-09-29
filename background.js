@@ -183,7 +183,7 @@ class FioriTestBackground {
     const responseKey = this.generateResponseKey(requestData.url, requestData.timestamp);
     const capturedResponse = this.capturedResponses.get(responseKey);
     
-    if (capturedResponse) {
+    if (capturedResponse && capturedResponse.method?.toUpperCase() === requestData.method?.toUpperCase()) {
       this.log('Found captured response for request:', requestData.url);
       return {
         captured: true,
@@ -202,7 +202,8 @@ class FioriTestBackground {
     // Try to find response by URL matching within a time window (±5 seconds)
     const timeWindow = 5000;
     for (const [key, response] of this.capturedResponses.entries()) {
-      if (response.url === requestData.url && 
+      if (response.method?.toUpperCase() === requestData.method?.toUpperCase() &&
+          new URL(response.url, requestData.url).href === requestData.url &&
           Math.abs(response.startTime - requestData.timestamp) < timeWindow) {
         this.log('Found captured response by time matching for:', requestData.url);
         return {
@@ -4127,4 +4128,3 @@ class FioriTestBackground {
 
 // Initialize background script
 const backgroundInstance = new FioriTestBackground();
-

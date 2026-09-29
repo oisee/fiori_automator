@@ -120,7 +120,8 @@ var FioriExportLogic = (() => {
   function reconcileCapturedResponse(session, response, tabId) {
     if (!session || session.tabId !== tabId) return null;
     const candidates = (session.networkRequests || []).filter(request =>
-      request.tabId === tabId && request.url === response.url &&
+      request.tabId === tabId && request.method?.toUpperCase() === response.method?.toUpperCase() &&
+      new URL(response.url, request.url).href === request.url &&
       request.responseBody?.captured !== true &&
       Math.abs(request.timestamp - response.startTime) < 5000);
     candidates.sort((a, b) => Math.abs(a.timestamp - response.startTime) -

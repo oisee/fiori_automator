@@ -98,15 +98,28 @@ test('CRLF multipart accepts arbitrary boundaries and preserves body lines', () 
 
 test('late capture repairs the matching saved request', () => {
   const session = { tabId: 1, networkRequests: [
-    { requestId: 'a', tabId: 1, url: '/api/Items', timestamp: 100,
+    { requestId: 'a', tabId: 1, method: 'GET', url: 'https://example.test/api/Items', timestamp: 100,
       responseBody: { captured: false } }
   ] };
-  const response = { url: '/api/Items', startTime: 101, responseData: 'ok',
+  const response = { url: '/api/Items', method: 'GET', startTime: 101, responseData: 'ok',
     contentType: 'text/plain', status: 200, headers: {} };
   assert.equal(logic.reconcileCapturedResponse(session, response, 2), null);
   assert.equal(logic.reconcileCapturedResponse(session, response, 1)?.requestId, 'a');
   assert.deepEqual(session.networkRequests[0].responseBody.data, 'ok');
   assert.equal(logic.reconcileCapturedResponse(session, response, 1), null);
+});
+
+test('late capture requires the same method as well as a normalized URL', () => {
+  const session = { tabId: 1, networkRequests: [
+    { requestId: 'get', tabId: 1, method: 'GET', url: 'https://example.test/api/Items',
+      timestamp: 100, responseBody: { captured: false } },
+    { requestId: 'post', tabId: 1, method: 'POST', url: 'https://example.test/api/Items',
+      timestamp: 101, responseBody: { captured: false } }
+  ] };
+  const response = { url: '/api/Items', method: 'POST', startTime: 100,
+    responseData: 'created' };
+  assert.equal(logic.reconcileCapturedResponse(session, response, 1)?.requestId, 'post');
+  assert.deepEqual(session.networkRequests[0].responseBody, { captured: false });
 });
 
 test('same-millisecond and immediate requests follow source interaction time', () => {

@@ -132,7 +132,7 @@ if (!window.FioriTestCapture) {
       const startTime = Date.now();
       const [resource, config] = args;
       const url = typeof resource === 'string' ? resource : resource.url;
-      const method = config?.method || 'GET';
+      const method = config?.method || resource?.method || 'GET';
 
       try {
         const response = await this.originalFetch.apply(window, args);
@@ -142,7 +142,7 @@ if (!window.FioriTestCapture) {
         
         // Capture response body for relevant requests
         if (this.isRelevantForCapture(url, method)) {
-          this.captureResponseBody(url, method, responseClone, startTime);
+          this.captureResponseBody(new URL(url, window.location.href).href, method, responseClone, startTime);
         }
         
         return response;
@@ -157,7 +157,7 @@ if (!window.FioriTestCapture) {
     const originalSend = this.originalXMLHttpRequest.prototype.send;
     
     this.originalXMLHttpRequest.prototype.open = function(method, url, ...args) {
-      this._fioriRequestData = { method, url, startTime: Date.now() };
+      this._fioriRequestData = { method, url: new URL(url, window.location.href).href, startTime: Date.now() };
       return originalOpen.call(this, method, url, ...args);
     };
     

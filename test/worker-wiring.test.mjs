@@ -30,10 +30,11 @@ test('worker exports parsed batch parts after a second cleaning pass', () => {
 
 test('worker reconciles late capture with a saved request', () => {
   const instance = worker();
-  const request = { requestId: 'r', tabId: 1, url: '/api/Items', timestamp: 100,
+  const request = { requestId: 'r', tabId: 1, method: 'GET',
+    url: 'https://example.test/api/Items', timestamp: 100,
     responseBody: { captured: false } };
   instance.sessions.set(1, { tabId: 1, networkRequests: [request] });
-  instance.handleCapturedResponse({ url: '/api/Items', startTime: 101,
+  instance.handleCapturedResponse({ url: '/api/Items', method: 'GET', startTime: 101,
     responseData: 'ok', contentType: 'text/plain' }, 1);
   assert.equal(request.responseBody.data, 'ok');
 });
