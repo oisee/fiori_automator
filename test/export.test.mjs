@@ -18,3 +18,14 @@ test('batch parser keeps real requests and changeset identity', () => {
   ]);
   assert.equal(logic.cleanBatchParts([{ method: null, url: null }]).length, 0);
 });
+
+test('body cleaning records lengths when a string or JSON body exceeds the limit', () => {
+  const long = 'x'.repeat(logic.BODY_LIMIT + 3);
+  const cleaned = logic.cleanBody(long);
+  assert.equal(cleaned.truncated, true);
+  assert.equal(cleaned.originalLength, logic.BODY_LIMIT + 3);
+  assert.equal(cleaned.keptLength, logic.BODY_LIMIT);
+  assert.equal(cleaned.data.length, logic.BODY_LIMIT);
+  assert.deepEqual(logic.cleanBody({ captured: true, data: long }).data, cleaned);
+  assert.deepEqual(logic.cleanBody({ value: 'ok' }), { value: 'ok' });
+});

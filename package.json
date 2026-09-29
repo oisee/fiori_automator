@@ -8,7 +8,7 @@
     "build:dev": "./build.sh dev",
     "clean": "rm -rf dist/ build/",
     "icons": "./create-icons.sh",
-    "test": "echo 'No tests configured yet'",
+    "test": "node --test test/*.test.mjs",
     "lint": "echo 'No linting configured yet'",
     "validate": "python3 -m json.tool manifest.json > /dev/null && echo '✓ Manifest valid' || echo '✗ Manifest invalid'",
     "zip": "cd dist && zip -r ../fiori-extension.zip . && cd ..",

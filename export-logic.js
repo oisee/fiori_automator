@@ -64,6 +64,22 @@ var FioriExportLogic = (() => {
     }));
   }
 
-  return { parseBatch, cleanBatchParts };
+  const BODY_LIMIT = 1024 * 1024;
+
+  function cleanBody(body) {
+    if (body == null) return null;
+    if (body?.captured === true) return { ...body, data: cleanBody(body.data) };
+    if (typeof body !== 'string' && typeof body !== 'object') return body;
+    const serialized = typeof body === 'string' ? body : JSON.stringify(body);
+    if (serialized.length <= BODY_LIMIT) return body;
+    return {
+      data: serialized.slice(0, BODY_LIMIT),
+      truncated: true,
+      originalLength: serialized.length,
+      keptLength: BODY_LIMIT
+    };
+  }
+
+  return { parseBatch, cleanBatchParts, cleanBody, BODY_LIMIT };
 })();
 if (typeof module !== 'undefined') module.exports = FioriExportLogic;

@@ -1,4 +1,5 @@
 // Content script for Fiori Test Automation System
+const FIORI_RESPONSE_BODY_LIMIT = 1024 * 1024;
 // Captures DOM interactions, SAPUI5 context, and coordinates with background script
 
 // Only declare the class if it doesn't already exist
@@ -190,6 +191,7 @@ if (!window.FioriTestCapture) {
     try {
       const contentType = response.headers.get('content-type') || '';
       let responseData = null;
+      let truncation = {};
 
       // Only capture text-based responses to avoid large binary data
       if (contentType.includes('application/json') ||
@@ -199,9 +201,13 @@ if (!window.FioriTestCapture) {
         
         responseData = await response.text();
         
-        // Limit response size to 50KB to avoid memory issues
-        if (responseData.length > 50000) {
-          responseData = responseData.substring(0, 50000) + '...[truncated]';
+        if (responseData.length > FIORI_RESPONSE_BODY_LIMIT) {
+          truncation = {
+            truncated: true,
+            originalLength: responseData.length,
+            keptLength: FIORI_RESPONSE_BODY_LIMIT
+          };
+          responseData = responseData.slice(0, FIORI_RESPONSE_BODY_LIMIT);
         }
       }
 
@@ -212,6 +218,7 @@ if (!window.FioriTestCapture) {
         statusText: response.statusText,
         headers: Object.fromEntries(response.headers.entries()),
         responseData,
+        ...truncation,
         contentType,
         startTime,
         endTime: Date.now(),

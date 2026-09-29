@@ -190,7 +190,10 @@ class FioriTestBackground {
         data: capturedResponse.responseData,
         contentType: capturedResponse.contentType,
         status: capturedResponse.status,
-        headers: capturedResponse.headers
+        headers: capturedResponse.headers,
+        truncated: capturedResponse.truncated,
+        originalLength: capturedResponse.originalLength,
+        keptLength: capturedResponse.keptLength
       };
     }
 
@@ -205,7 +208,10 @@ class FioriTestBackground {
           data: response.responseData,
           contentType: response.contentType,
           status: response.status,
-          headers: response.headers
+          headers: response.headers,
+          truncated: response.truncated,
+          originalLength: response.originalLength,
+          keptLength: response.keptLength
         };
       }
     }
@@ -1782,21 +1788,8 @@ class FioriTestBackground {
   }
 
   cleanBody(body) {
-    if (!body) return null;
-    
     try {
-      // If it's already an object, stringify and limit size
-      if (typeof body === 'object') {
-        const jsonString = JSON.stringify(body);
-        return jsonString.length > 10000 ? jsonString.substring(0, 10000) + '...[truncated]' : body;
-      }
-      
-      // If it's a string, limit size
-      if (typeof body === 'string') {
-        return body.length > 10000 ? body.substring(0, 10000) + '...[truncated]' : body;
-      }
-      
-      return body;
+      return FioriExportLogic.cleanBody(body);
     } catch (error) {
       return '[Error serializing body]';
     }
