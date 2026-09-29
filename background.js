@@ -2453,7 +2453,7 @@ class FioriTestBackground {
                   eventId: event.eventId,
                   entity,
                   operation: req.method,
-                  confidence: req.correlation
+                  correlation: req.correlation
                 });
               }
             }
@@ -3199,7 +3199,7 @@ class FioriTestBackground {
       if (sequenceSummary.odataOperations.length > 0) {
         markdown += `### OData Operations Details\n\n`;
         sequenceSummary.odataOperations.forEach((op, index) => {
-          markdown += `${index + 1}. **Event ${op.eventId}**: ${op.operation} on ${op.entity} (${op.confidence}% confidence)\n`;
+          markdown += `${index + 1}. **Event ${op.eventId}**: ${op.operation} on ${op.entity} (${op.correlation} correlation)\n`;
         });
         markdown += `\n`;
       }
