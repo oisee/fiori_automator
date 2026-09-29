@@ -35,7 +35,6 @@ var FioriExportLogic = (() => {
         const requestLine = parsed.body.match(/^(GET|POST|PUT|PATCH|DELETE|MERGE)\s+(\S+)\s+HTTP\/\d(?:\.\d)?\r?\n/i);
         if (!requestLine) continue;
         const operation = headersAndBody(parsed.body + (parsed.body.match(/\r?\n\r?\n/) ? '' : '\r\n'));
-        if (!operation) continue;
         parts.push({ method: requestLine[1].toUpperCase(), url: requestLine[2],
           headers: operation.headers, body: operation.body || null, changeset });
       }
