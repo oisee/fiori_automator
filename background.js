@@ -243,9 +243,12 @@ class FioriTestBackground {
     }
 
     const session = this.sessions.get(tabId);
-    FioriExportLogic.reconcileCapturedResponse(session, responseData, tabId);
+    const activeSession = session?.isRecording && responseData.startTime >= session.startTime;
+    if (activeSession) {
+      FioriExportLogic.reconcileCapturedResponse(session, responseData, tabId);
+    }
 
-    if (!session?.isRecording) {
+    if (!activeSession) {
       this.captureWriteQueue = this.captureWriteQueue.catch(() => {}).then(async () => {
         await this.stoppingSaves.get(tabId);
         const result = await chrome.storage.local.get(['fioriSessions']);

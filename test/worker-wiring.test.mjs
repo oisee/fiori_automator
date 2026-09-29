@@ -35,7 +35,8 @@ test('worker reconciles late capture with a saved request', async () => {
   const request = { requestId: 'r', tabId: 1, method: 'GET',
     url: 'https://example.test/api/Items', timestamp: 100,
     responseBody: { captured: false } };
-  instance.sessions.set(1, { tabId: 1, isRecording: true, networkRequests: [request] });
+  instance.sessions.set(1, { tabId: 1, startTime: 50, isRecording: true,
+    networkRequests: [request] });
   await instance.handleCapturedResponse({ url: '/api/Items', method: 'GET', startTime: 101,
     responseData: 'ok', contentType: 'text/plain' }, 1);
   assert.equal(request.responseBody.data, 'ok');
@@ -68,6 +69,42 @@ test('a response arriving after stop repairs the stored export', async () => {
   await instance.handleCapturedResponse({ url: '/api/Items', method: 'GET',
     startTime: now - 49, responseData: 'late', status: 200 }, 1);
   assert.equal(stored.fioriSessions.synthetic.networkRequests[0].responseBody.data, 'late');
+});
+
+test('a late response repairs the stopped session after recording restarts in the same tab', async () => {
+  const stored = { fioriSessions: {} };
+  context.chrome = { storage: { local: {
+    async get() { return structuredClone(stored); },
+    async set(value) { stored.fioriSessions = structuredClone(value.fioriSessions); }
+  } } };
+  const instance = worker();
+  instance.stopAudioRecording = async () => null;
+  instance.notifyContentScript = async () => {};
+  instance.broadcastStateChange = () => {};
+  instance.audioRecordings = new Map();
+  instance.saveSession = async session => {
+    const result = await context.chrome.storage.local.get(['fioriSessions']);
+    result.fioriSessions[session.sessionId] = instance.cleanSessionData(session);
+    await context.chrome.storage.local.set(result);
+  };
+  const now = Date.now();
+  instance.sessions.set(1, { sessionId: 'old', tabId: 1, startTime: now - 100,
+    pausedTime: 0, isRecording: true, metadata: {}, events: [], networkRequests: [{
+      requestId: 'old', tabId: 1, method: 'GET', url: 'https://example.test/api/Items',
+      timestamp: now - 50, responseBody: { captured: false }
+    }] });
+  await instance.stopRecording(1);
+  const newRequest = { requestId: 'new', tabId: 1, method: 'GET',
+    url: 'https://example.test/api/Items', timestamp: now + 1,
+    responseBody: { captured: false } };
+  instance.sessions.set(1, { sessionId: 'new', tabId: 1, startTime: now,
+    isRecording: true, networkRequests: [newRequest] });
+
+  await instance.handleCapturedResponse({ url: '/api/Items', method: 'GET',
+    startTime: now - 49, responseData: 'late', status: 200 }, 1);
+
+  assert.equal(stored.fioriSessions.old.networkRequests[0].responseBody.data, 'late');
+  assert.equal(newRequest.responseBody.captured, false);
 });
 
 test('Markdown session summary prints the correlation label', () => {
