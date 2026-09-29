@@ -2,55 +2,46 @@
 var FioriExportLogic = (() => {
   function parseBatch(requestBody) {
     if (typeof requestBody !== 'string') return [];
+    const first = requestBody.match(/^--([^\r\n]+)\r?\n/);
+    if (!first) return [];
     const parts = [];
-    let changeset = null;
-    let part = null;
-    let readingHeaders = false;
-    let readingBody = false;
 
-    function finishPart() {
-      if (part?.method && part.url) {
-        part.body = part.body.length ? part.body.join('\n').trimEnd() : null;
-        delete part._body;
-        parts.push(part);
+    function headersAndBody(text) {
+      const separator = text.match(/\r?\n\r?\n/);
+      if (!separator) return null;
+      const headers = {};
+      for (const line of text.slice(0, separator.index).split(/\r?\n/)) {
+        const colon = line.indexOf(':');
+        if (colon > 0) headers[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
       }
-      part = null;
-      readingHeaders = false;
-      readingBody = false;
+      return { headers, body: text.slice(separator.index + separator[0].length) };
     }
 
-    for (const rawLine of requestBody.split(/\r?\n/)) {
-      const line = rawLine.trim();
-      if (/^--changeset_[^\s]+/.test(line)) {
-        finishPart();
-        changeset = line.endsWith('--') ? null : line.slice(2);
-        continue;
-      }
-      if (/^--batch_[^\s]+/.test(line)) {
-        finishPart();
-        if (line.endsWith('--')) changeset = null;
-        continue;
-      }
-      const match = line.match(/^(GET|POST|PUT|PATCH|DELETE|MERGE)\s+(\S+)\s+HTTP\/\d(?:\.\d)?$/i);
-      if (match) {
-        finishPart();
-        part = { method: match[1].toUpperCase(), url: match[2], headers: {}, body: [], changeset };
-        readingHeaders = true;
-        continue;
-      }
-      if (readingHeaders && part) {
-        if (!line) {
-          readingHeaders = false;
-          readingBody = true;
-        } else {
-          const separator = rawLine.indexOf(':');
-          if (separator > 0) part.headers[rawLine.slice(0, separator).trim()] = rawLine.slice(separator + 1).trim();
+    function parseMultipart(text, boundary, changeset) {
+      const escaped = boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const delimiter = new RegExp(`(?:^|\\r?\\n)--${escaped}(--)?[ \t]*(?:\\r?\\n|$)`, 'g');
+      const markers = [...text.matchAll(delimiter)];
+      for (let i = 0; i < markers.length - 1; i++) {
+        if (markers[i][1]) break;
+        const section = text.slice(markers[i].index + markers[i][0].length, markers[i + 1].index);
+        const parsed = headersAndBody(section);
+        if (!parsed) continue;
+        const type = Object.entries(parsed.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1] || '';
+        const nested = type.match(/boundary=(?:"([^"]+)"|([^;\s]+))/i);
+        if (nested) {
+          parseMultipart(parsed.body, nested[1] || nested[2], nested[1] || nested[2]);
+          continue;
         }
-      } else if (readingBody && part) {
-        part.body.push(rawLine);
+        const requestLine = parsed.body.match(/^(GET|POST|PUT|PATCH|DELETE|MERGE)\s+(\S+)\s+HTTP\/\d(?:\.\d)?\r?\n/i);
+        if (!requestLine) continue;
+        const operation = headersAndBody(parsed.body + (parsed.body.match(/\r?\n\r?\n/) ? '' : '\r\n'));
+        if (!operation) continue;
+        parts.push({ method: requestLine[1].toUpperCase(), url: requestLine[2],
+          headers: operation.headers, body: operation.body || null, changeset });
       }
     }
-    finishPart();
+
+    parseMultipart(requestBody, first[1], null);
     return parts;
   }
 

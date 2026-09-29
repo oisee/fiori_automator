@@ -69,3 +69,17 @@ test('batch parts remain clean after a second export pass', () => {
   const parsed = logic.cleanBatchParts(logic.parseBatch('--batch_demo\nGET Items HTTP/1.1\n\n--batch_demo--'));
   assert.deepEqual(logic.cleanBatchParts(parsed), parsed);
 });
+
+test('CRLF multipart accepts arbitrary boundaries and preserves body lines', () => {
+  const body = [
+    '--outer-7', 'Content-Type: multipart/mixed; boundary="inner-2"', '',
+    '--inner-2', 'Content-Type: application/http', '',
+    'PATCH Items(1) HTTP/1.1', 'Content-Type: text/plain', '',
+    'line one', 'GET fake HTTP/1.1', 'last line  ',
+    '--inner-2--', '--outer-7--'
+  ].join('\r\n');
+  assert.deepEqual(logic.parseBatch(body), [{
+    method: 'PATCH', url: 'Items(1)', headers: { 'Content-Type': 'text/plain' },
+    body: 'line one\r\nGET fake HTTP/1.1\r\nlast line  ', changeset: 'inner-2'
+  }]);
+});
