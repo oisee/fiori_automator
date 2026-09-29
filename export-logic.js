@@ -80,6 +80,17 @@ var FioriExportLogic = (() => {
     };
   }
 
-  return { parseBatch, cleanBatchParts, cleanBody, BODY_LIMIT };
+  function cleanUI5Context(context) {
+    if (!context) return null;
+    const info = context.elementUI5Info || context;
+    return {
+      controlId: info.controlId,
+      controlType: info.controlType,
+      bindingInfo: info.bindingInfo,
+      properties: info.properties
+    };
+  }
+
+  return { parseBatch, cleanBatchParts, cleanBody, cleanUI5Context, BODY_LIMIT };
 })();
 if (typeof module !== 'undefined') module.exports = FioriExportLogic;

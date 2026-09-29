@@ -1698,11 +1698,7 @@ class FioriTestBackground {
           selector: event.element.selector,
           xpath: event.element.xpath
         } : null,
-        ui5Context: event.ui5Context ? {
-          controlType: event.ui5Context.controlType,
-          controlId: event.ui5Context.controlId,
-          properties: event.ui5Context.properties
-        } : null,
+        ui5Context: FioriExportLogic.cleanUI5Context(event.ui5Context),
         value: event.value,
         key: event.key,
         correlatedRequests: event.correlatedRequests?.map(req => ({

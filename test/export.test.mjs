@@ -29,3 +29,13 @@ test('body cleaning records lengths when a string or JSON body exceeds the limit
   assert.deepEqual(logic.cleanBody({ captured: true, data: long }).data, cleaned);
   assert.deepEqual(logic.cleanBody({ value: 'ok' }), { value: 'ok' });
 });
+
+test('UI5 control identity and binding survive event cleaning', () => {
+  const context = { globalUI5Context: { isUI5App: true }, elementUI5Info: {
+    controlId: 'view--field', controlType: 'sap.m.Input',
+    bindingInfo: { value: { path: '/Items(1)/Name', model: 'ODataModel' } },
+    properties: { editable: true }
+  } };
+  assert.deepEqual(logic.cleanUI5Context(context), context.elementUI5Info);
+  assert.equal(logic.cleanUI5Context(null), null);
+});
