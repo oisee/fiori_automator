@@ -28,6 +28,24 @@ var FioriResponseCapture = (() => {
       reader.releaseLock();
     }
   }
-  return { readLimitedText };
+  function summarizeXhr(xhr, limit) {
+    const responseType = xhr.responseType || 'text';
+    const contentType = xhr.getResponseHeader('content-type') || '';
+    const headers = xhr.getAllResponseHeaders();
+    let responseData = null;
+    if (responseType === 'text') responseData = xhr.responseText;
+    if (responseType === 'json') responseData = JSON.stringify(xhr.response);
+    let truncation = {};
+    if (responseData != null && responseData.length > limit) {
+      truncation = { truncated: true, originalLength: responseData.length, keptLength: limit };
+      responseData = responseData.slice(0, limit);
+    }
+    const byteLength = responseType === 'arraybuffer' ? xhr.response?.byteLength :
+      responseType === 'blob' ? xhr.response?.size :
+      responseType === 'document' ? Number(xhr.getResponseHeader('content-length')) || null : undefined;
+    return { responseType, responseData, byteLength, contentType, headers, ...truncation };
+  }
+
+  return { readLimitedText, summarizeXhr };
 })();
 if (typeof module !== 'undefined') module.exports = FioriResponseCapture;

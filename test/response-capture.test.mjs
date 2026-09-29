@@ -15,3 +15,11 @@ test('streamed capture keeps a bounded body and counts all decoded text', async 
     responseData: 'abcde', truncated: true, originalLength: 9, keptLength: 5
   });
 });
+
+test('XHR JSON is captured and document length is explicitly unavailable', () => {
+  const xhr = { responseType: 'json', response: { item: 1 },
+    getResponseHeader: () => null, getAllResponseHeaders: () => '' };
+  assert.equal(capture.summarizeXhr(xhr, 100).responseData, '{"item":1}');
+  xhr.responseType = 'document';
+  assert.equal(capture.summarizeXhr(xhr, 100).byteLength, null);
+});
