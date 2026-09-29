@@ -239,6 +239,9 @@ class FioriTestBackground {
       toDelete.forEach(key => this.capturedResponses.delete(key));
     }
 
+    const session = this.sessions.get(tabId);
+    FioriExportLogic.reconcileCapturedResponse(session, responseData, tabId);
+
     this.log('Captured response for:', responseData.url, 'Status:', responseData.status);
   }
 

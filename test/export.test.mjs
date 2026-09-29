@@ -83,3 +83,16 @@ test('CRLF multipart accepts arbitrary boundaries and preserves body lines', () 
     body: 'line one\r\nGET fake HTTP/1.1\r\nlast line  ', changeset: 'inner-2'
   }]);
 });
+
+test('late capture repairs the matching saved request', () => {
+  const session = { tabId: 1, networkRequests: [
+    { requestId: 'a', tabId: 1, url: '/api/Items', timestamp: 100,
+      responseBody: { captured: false } }
+  ] };
+  const response = { url: '/api/Items', startTime: 101, responseData: 'ok',
+    contentType: 'text/plain', status: 200, headers: {} };
+  assert.equal(logic.reconcileCapturedResponse(session, response, 2), null);
+  assert.equal(logic.reconcileCapturedResponse(session, response, 1)?.requestId, 'a');
+  assert.deepEqual(session.networkRequests[0].responseBody.data, 'ok');
+  assert.equal(logic.reconcileCapturedResponse(session, response, 1), null);
+});

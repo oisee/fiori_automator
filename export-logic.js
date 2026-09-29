@@ -115,6 +115,25 @@ var FioriExportLogic = (() => {
     return matches;
   }
 
-  return { parseBatch, cleanBatchParts, cleanBody, cleanUI5Context, correlateTimeline, BODY_LIMIT };
+  function reconcileCapturedResponse(session, response, tabId) {
+    if (!session || session.tabId !== tabId) return null;
+    const candidates = (session.networkRequests || []).filter(request =>
+      request.tabId === tabId && request.url === response.url &&
+      request.responseBody?.captured !== true &&
+      Math.abs(request.timestamp - response.startTime) < 5000);
+    candidates.sort((a, b) => Math.abs(a.timestamp - response.startTime) -
+      Math.abs(b.timestamp - response.startTime));
+    const request = candidates[0];
+    if (!request) return null;
+    request.responseBody = {
+      captured: true, data: response.responseData, contentType: response.contentType,
+      status: response.status, headers: response.headers, truncated: response.truncated,
+      originalLength: response.originalLength, keptLength: response.keptLength,
+      responseType: response.responseType, byteLength: response.byteLength
+    };
+    return request;
+  }
+
+  return { parseBatch, cleanBatchParts, cleanBody, cleanUI5Context, correlateTimeline, reconcileCapturedResponse, BODY_LIMIT };
 })();
 if (typeof module !== 'undefined') module.exports = FioriExportLogic;
