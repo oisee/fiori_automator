@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import logic from '../export-logic.js';
+
+test('batch parser keeps real requests and changeset identity', () => {
+  const body = [
+    '--batch_demo', 'Content-Type: multipart/mixed; boundary=changeset_one', '',
+    '--changeset_one', 'Content-Type: application/http', '',
+    'PATCH Items(1) HTTP/1.1', 'Content-Type: application/json', 'X-Test: yes', '',
+    '{"name":"A"}', '--changeset_one--', '--batch_demo',
+    'Content-Type: application/http', '', 'GET Items HTTP/1.1', 'Accept: application/json', '',
+    '--batch_demo--'
+  ].join('\r\n');
+  const parts = logic.cleanBatchParts(logic.parseBatch(body));
+  assert.deepEqual(parts, [
+    { method: 'PATCH', url: 'Items(1)', headers: { 'Content-Type': 'application/json', 'X-Test': 'yes' }, body: '{"name":"A"}', changeset: 'changeset_one' },
+    { method: 'GET', url: 'Items', headers: { Accept: 'application/json' }, body: null, changeset: null }
+  ]);
+  assert.equal(logic.cleanBatchParts([{ method: null, url: null }]).length, 0);
+});

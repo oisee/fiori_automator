@@ -1,3 +1,5 @@
+importScripts('export-logic.js');
+
 // Background script for Fiori Test Automation System
 // Handles network request interception, storage management, and session coordination
 
@@ -473,87 +475,10 @@ class FioriTestBackground {
   }
 
   unwrapBatchRequest(requestBody) {
-    if (!requestBody || typeof requestBody !== 'string') {
-      return [];
-    }
-
-    const operations = [];
-    
-    try {
-      // Parse multipart/mixed batch format
-      const lines = requestBody.split('\n');
-      let currentOperation = null;
-      let inRequestHeaders = false;
-      let inRequestBody = false;
-      
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        
-        // Detect batch boundary
-        if (line.startsWith('--batch_') || line.startsWith('--changeset_')) {
-          if (currentOperation) {
-            operations.push(currentOperation);
-          }
-          currentOperation = {
-            type: 'unknown',
-            method: null,
-            url: null,
-            headers: {},
-            body: null
-          };
-          inRequestHeaders = false;
-          inRequestBody = false;
-          continue;
-        }
-        
-        // Parse HTTP request line (e.g., "GET EntitySet HTTP/1.1")
-        if (line.match(/^(GET|POST|PUT|PATCH|DELETE|MERGE)\s+/)) {
-          const match = line.match(/^(\w+)\s+([^\s]+)/);
-          if (match && currentOperation) {
-            currentOperation.method = match[1];
-            currentOperation.url = match[2];
-            currentOperation.type = this.classifyBatchOperation(match[1], match[2]);
-            inRequestHeaders = true;
-            inRequestBody = false;
-          }
-          continue;
-        }
-        
-        // Parse headers
-        if (inRequestHeaders && line.includes(':')) {
-          const [key, ...valueParts] = line.split(':');
-          if (currentOperation) {
-            currentOperation.headers[key.trim()] = valueParts.join(':').trim();
-          }
-          continue;
-        }
-        
-        // Empty line indicates end of headers, start of body
-        if (inRequestHeaders && line === '') {
-          inRequestHeaders = false;
-          inRequestBody = true;
-          continue;
-        }
-        
-        // Collect request body
-        if (inRequestBody && line && currentOperation) {
-          if (!currentOperation.body) {
-            currentOperation.body = '';
-          }
-          currentOperation.body += line + '\n';
-        }
-      }
-      
-      // Add the last operation
-      if (currentOperation) {
-        operations.push(currentOperation);
-      }
-      
-    } catch (error) {
-      this.log('Error unwrapping batch request:', error);
-    }
-    
-    return operations.filter(op => op.method && op.url);
+    return FioriExportLogic.parseBatch(requestBody).map(part => ({
+      ...part,
+      type: this.classifyBatchOperation(part.method, part.url)
+    }));
   }
 
   classifyBatchOperation(method, url) {
@@ -1826,6 +1751,7 @@ class FioriTestBackground {
         requestHeaders: this.cleanHeaders(request.requestHeaders),
         responseHeaders: this.cleanHeaders(request.responseHeaders),
         requestBody: this.cleanBody(request.requestBody),
+        batchParts: FioriExportLogic.cleanBatchParts(request.batchOperations),
         responseBody: this.cleanBody(request.responseBody),
         correlation: request.correlation
       };
