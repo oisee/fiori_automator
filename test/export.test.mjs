@@ -39,3 +39,33 @@ test('UI5 control identity and binding survive event cleaning', () => {
   assert.deepEqual(logic.cleanUI5Context(context), context.elementUI5Info);
   assert.equal(logic.cleanUI5Context(null), null);
 });
+
+test('correlation follows tab and interaction sequence, preferring bound requests', () => {
+  const events = [
+    { eventId: 'a', type: 'click', timestamp: 100, ui5Context: { elementUI5Info: { bindingInfo: { value: { path: '/Items(1)' } } } } },
+    { eventId: 'b', type: 'input', timestamp: 250 },
+    { eventId: 'c', type: 'navigation', timestamp: 12000 }
+  ];
+  const requests = [
+    { requestId: 'before', tabId: 1, timestamp: 99, url: '/Items(1)', type: 'odata' },
+    { requestId: 'other-tab', tabId: 2, timestamp: 120, url: '/Items(1)', type: 'odata' },
+    { requestId: 'generic', tabId: 1, timestamp: 120, url: '/api/other', type: 'odata' },
+    { requestId: 'bound', tabId: 1, timestamp: 150, url: '/Items(1)', type: 'odata' },
+    { requestId: 'next', tabId: 1, timestamp: 300, url: '/api/other', type: 'other' },
+    { requestId: 'late', tabId: 1, timestamp: 11000, url: '/api/late', type: 'odata' }
+  ];
+  const matches = logic.correlateTimeline(events, requests, 1);
+  assert.deepEqual(matches.get('a').map(item => [item.requestId, item.correlation]), [
+    ['bound', 'bound'], ['generic', 'sequence']
+  ]);
+  assert.deepEqual(matches.get('b').map(item => [item.requestId, item.correlation]), [
+    ['next', 'tentative']
+  ]);
+  assert.deepEqual(matches.get('c'), []);
+});
+
+
+test('batch parts remain clean after a second export pass', () => {
+  const parsed = logic.cleanBatchParts(logic.parseBatch('--batch_demo\nGET Items HTTP/1.1\n\n--batch_demo--'));
+  assert.deepEqual(logic.cleanBatchParts(parsed), parsed);
+});

@@ -91,6 +91,39 @@ var FioriExportLogic = (() => {
     };
   }
 
-  return { parseBatch, cleanBatchParts, cleanBody, cleanUI5Context, BODY_LIMIT };
+  function correlateTimeline(events, requests, tabId) {
+    const interactions = events.filter(event =>
+      ['click', 'input', 'navigation', 'page_unload', 'field_edit'].includes(event.type));
+    const matches = new Map();
+    for (let index = 0; index < interactions.length; index++) {
+      const event = interactions[index];
+      const nextTime = interactions[index + 1]?.timestamp ?? Infinity;
+      const info = event.ui5Context?.elementUI5Info || event.ui5Context;
+      const paths = Object.values(info?.bindingInfo || {}).map(binding => binding?.path)
+        .filter(path => typeof path === 'string' && path.length > 1);
+      const correlated = requests.filter(request =>
+        request.tabId === tabId && request.timestamp > event.timestamp &&
+        request.timestamp < nextTime && request.timestamp - event.timestamp <= 10000
+      ).map(request => {
+        const body = typeof request.requestBody === 'string' ? request.requestBody :
+          JSON.stringify(request.requestBody || '');
+        const target = `${request.url || ''} ${body}`;
+        const bound = paths.some(path => {
+          const candidates = [path, path.substring(0, path.lastIndexOf('/'))].filter(value => value.length > 1);
+          return candidates.some(value => target.includes(value) || target.includes(encodeURIComponent(value)));
+        });
+        return {
+          ...request,
+          correlation: bound ? 'bound' : request.type?.includes('odata') ? 'sequence' : 'tentative'
+        };
+      });
+      const rank = { bound: 0, sequence: 1, tentative: 2 };
+      correlated.sort((a, b) => rank[a.correlation] - rank[b.correlation] || a.timestamp - b.timestamp);
+      matches.set(event.eventId, correlated);
+    }
+    return matches;
+  }
+
+  return { parseBatch, cleanBatchParts, cleanBody, cleanUI5Context, correlateTimeline, BODY_LIMIT };
 })();
 if (typeof module !== 'undefined') module.exports = FioriExportLogic;
