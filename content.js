@@ -323,6 +323,7 @@ if (!window.FioriTestCapture) {
   }
 
   async captureClickEvent(event) {
+    const interactionTime = Date.now();
     console.log('[Fiori] captureClickEvent called - isRecording:', this.isRecording);
     
     if (!this.isRecording) {
@@ -337,6 +338,7 @@ if (!window.FioriTestCapture) {
     
     const eventData = {
       type: 'click',
+      timestamp: interactionTime,
       coordinates: {
         x: event.clientX,
         y: event.clientY,
@@ -367,6 +369,7 @@ if (!window.FioriTestCapture) {
   }
 
   async captureInputEvent(event) {
+    const interactionTime = Date.now();
     const element = event.target;
     
     // Capture screenshot for input events
@@ -374,6 +377,7 @@ if (!window.FioriTestCapture) {
     
     const eventData = {
       type: 'input',
+      timestamp: interactionTime,
       element: await this.getElementInfo(element),
       value: element.value,
       inputType: event.inputType,

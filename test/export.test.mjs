@@ -96,3 +96,13 @@ test('late capture repairs the matching saved request', () => {
   assert.deepEqual(session.networkRequests[0].responseBody.data, 'ok');
   assert.equal(logic.reconcileCapturedResponse(session, response, 1), null);
 });
+
+test('same-millisecond and immediate requests follow source interaction time', () => {
+  const events = [{ eventId: 'click', type: 'click', timestamp: 100 }];
+  const requests = [
+    { requestId: 'same', tabId: 1, timestamp: 100, url: '/api/a' },
+    { requestId: 'immediate', tabId: 1, timestamp: 101, url: '/api/b' }
+  ];
+  assert.deepEqual(logic.correlateTimeline(events, requests, 1).get('click')
+    .map(request => request.requestId), ['same', 'immediate']);
+});

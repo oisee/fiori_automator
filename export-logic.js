@@ -93,7 +93,7 @@ var FioriExportLogic = (() => {
       const paths = Object.values(info?.bindingInfo || {}).map(binding => binding?.path)
         .filter(path => typeof path === 'string' && path.length > 1);
       const correlated = requests.filter(request =>
-        request.tabId === tabId && request.timestamp > event.timestamp &&
+        request.tabId === tabId && request.timestamp >= event.timestamp &&
         request.timestamp < nextTime && request.timestamp - event.timestamp <= 10000
       ).map(request => {
         const body = typeof request.requestBody === 'string' ? request.requestBody :
