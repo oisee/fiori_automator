@@ -16,6 +16,12 @@ test('streamed capture keeps a bounded body and counts all decoded text', async 
   });
 });
 
+test('capture handles a no-body response with a text content type', async () => {
+  const response = new Response(null, { status: 204,
+    headers: { 'content-type': 'application/json' } });
+  assert.deepEqual(await capture.readLimitedText(response, 1024), { responseData: '' });
+});
+
 test('XHR JSON is captured and document length is explicitly unavailable', () => {
   const xhr = { responseType: 'json', response: { item: 1 },
     getResponseHeader: () => null, getAllResponseHeaders: () => '' };

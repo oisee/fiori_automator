@@ -1,6 +1,7 @@
 // Shared response capture helpers for the content script and Node tests.
 var FioriResponseCapture = (() => {
   async function readLimitedText(response, limit) {
+    if (!response.body) return { responseData: '' };
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     const chunks = [];
