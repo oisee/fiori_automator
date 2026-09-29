@@ -69,3 +69,17 @@ test('a response arriving after stop repairs the stored export', async () => {
     startTime: now - 49, responseData: 'late', status: 200 }, 1);
   assert.equal(stored.fioriSessions.synthetic.networkRequests[0].responseBody.data, 'late');
 });
+
+test('Markdown session summary prints the correlation label', () => {
+  const instance = worker();
+  instance.analyzeODataOperations = () => ({ entities: [], operations: [] });
+  instance.generateSequenceSummary = () => ({ interactions: [{}], actors: ['user'],
+    entities: ['Items'], odataOperations: [{ eventId: 'event-1', operation: 'GET',
+      entity: 'Items', correlation: 'bound' }] });
+  instance.generateImprovedSessionName = () => 'Synthetic session';
+  instance.generateMermaidDiagrams = () => '';
+  const markdown = instance.generateSessionMarkdown({ sessionId: 'synthetic',
+    startTime: 100, metadata: {}, events: [], networkRequests: [] });
+  assert.match(markdown, /Event event-1.*\(bound correlation\)/);
+  assert.doesNotMatch(markdown, /\[object Object\] correlation/);
+});
