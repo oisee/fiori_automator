@@ -232,10 +232,10 @@ class FioriTestBackground {
     // Store the captured response
     this.capturedResponses.set(responseKey, responseData);
     
-    // Clean up old responses (keep only last 100)
-    if (this.capturedResponses.size > 100) {
+    // Bound retained response bodies to about 10 MiB.
+    if (this.capturedResponses.size > 10) {
       const keys = Array.from(this.capturedResponses.keys());
-      const toDelete = keys.slice(0, keys.length - 100);
+      const toDelete = keys.slice(0, keys.length - 10);
       toDelete.forEach(key => this.capturedResponses.delete(key));
     }
 

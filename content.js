@@ -218,15 +218,11 @@ if (!window.FioriTestCapture) {
           contentType.includes('application/xml') ||
           contentType.includes('application/atom+xml')) {
         
-        responseData = await response.text();
-        
-        if (responseData.length > FIORI_RESPONSE_BODY_LIMIT) {
-          truncation = {
-            truncated: true,
-            originalLength: responseData.length,
-            keptLength: FIORI_RESPONSE_BODY_LIMIT
-          };
-          responseData = responseData.slice(0, FIORI_RESPONSE_BODY_LIMIT);
+        const captured = await FioriResponseCapture.readLimitedText(response, FIORI_RESPONSE_BODY_LIMIT);
+        responseData = captured.responseData;
+        if (captured.truncated) {
+          truncation = { truncated: true, originalLength: captured.originalLength,
+            keptLength: captured.keptLength };
         }
       }
 
