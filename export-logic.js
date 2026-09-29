@@ -98,7 +98,9 @@ var FioriExportLogic = (() => {
       ).map(request => {
         const body = typeof request.requestBody === 'string' ? request.requestBody :
           JSON.stringify(request.requestBody || '');
-        const target = `${request.url || ''} ${body}`;
+        const partTargets = (request.batchParts || request.batchOperations || [])
+          .map(part => `${part.url || ''} ${typeof part.body === 'string' ? part.body : JSON.stringify(part.body || '')}`);
+        const target = `${request.url || ''} ${body} ${partTargets.join(' ')}`;
         const bound = paths.some(path => {
           const candidates = [path, path.substring(0, path.lastIndexOf('/'))].filter(value => value.length > 1);
           return candidates.some(value => target.includes(value) || target.includes(encodeURIComponent(value)));

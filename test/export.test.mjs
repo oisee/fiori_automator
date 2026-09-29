@@ -106,3 +106,12 @@ test('same-millisecond and immediate requests follow source interaction time', (
   assert.deepEqual(logic.correlateTimeline(events, requests, 1).get('click')
     .map(request => request.requestId), ['same', 'immediate']);
 });
+
+test('binding matches a batch part past the cleaned outer body limit', () => {
+  const events = [{ eventId: 'a', type: 'click', timestamp: 100,
+    ui5Context: { bindingInfo: { value: { path: '/Items(1)' } } } }];
+  const requests = [{ requestId: 'batch', tabId: 1, timestamp: 101,
+    url: '/$batch', requestBody: { data: 'unrelated', truncated: true },
+    batchParts: [{ url: '/Items(1)', body: '{"value":1}' }], type: 'odata-batch' }];
+  assert.equal(logic.correlateTimeline(events, requests, 1).get('a')[0].correlation, 'bound');
+});
