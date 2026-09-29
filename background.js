@@ -8,6 +8,8 @@ class FioriTestBackground {
     this.sessions = new Map();
     this.networkRequests = new Map();
     this.capturedResponses = new Map(); // Store captured response bodies by URL and timestamp
+    this.stoppingSaves = new Map();
+    this.captureWriteQueue = Promise.resolve();
     this.screenshots = new Map(); // Store screenshots by ID
     this.audioRecordings = new Map(); // Store audio recordings by session ID
     this.debug = false;
@@ -227,7 +229,7 @@ class FioriTestBackground {
     };
   }
 
-  handleCapturedResponse(responseData, tabId) {
+  async handleCapturedResponse(responseData, tabId) {
     const responseKey = this.generateResponseKey(responseData.url, responseData.startTime);
     
     // Store the captured response
@@ -242,6 +244,23 @@ class FioriTestBackground {
 
     const session = this.sessions.get(tabId);
     FioriExportLogic.reconcileCapturedResponse(session, responseData, tabId);
+
+    if (!session?.isRecording) {
+      this.captureWriteQueue = this.captureWriteQueue.catch(() => {}).then(async () => {
+        await this.stoppingSaves.get(tabId);
+        const result = await chrome.storage.local.get(['fioriSessions']);
+        const sessions = result.fioriSessions || {};
+        const saved = Object.values(sessions).filter(item =>
+          item.tabId === tabId && !item.isRecording &&
+          responseData.startTime >= item.startTime && responseData.startTime <= item.endTime)
+          .sort((a, b) => b.startTime - a.startTime)[0];
+        if (saved && FioriExportLogic.reconcileCapturedResponse(saved, responseData, tabId)) {
+          sessions[saved.sessionId] = saved;
+          await chrome.storage.local.set({ fioriSessions: sessions });
+        }
+      });
+      await this.captureWriteQueue;
+    }
 
     this.log('Captured response for:', responseData.url, 'Status:', responseData.status);
   }
@@ -724,7 +743,7 @@ class FioriTestBackground {
         }
 
         case 'response-captured': {
-          this.handleCapturedResponse(message.data, sender.tab?.id);
+          await this.handleCapturedResponse(message.data, sender.tab?.id);
           sendResponse({ success: true });
           break;
         }
@@ -818,7 +837,13 @@ class FioriTestBackground {
       await this.notifyContentScript(tabId, 'stop-recording');
 
       // Save session to storage (now includes audio data)
-      await this.saveSession(session);
+      const savePromise = this.saveSession(session);
+      this.stoppingSaves.set(tabId, savePromise);
+      try {
+        await savePromise;
+      } finally {
+        this.stoppingSaves.delete(tabId);
+      }
       
       // Broadcast state change
       this.broadcastStateChange(tabId, 'stopped');

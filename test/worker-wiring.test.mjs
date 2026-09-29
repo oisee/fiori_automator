@@ -16,6 +16,8 @@ function worker() {
   instance.log = () => {};
   instance.capturedResponses = new Map();
   instance.sessions = new Map();
+  instance.stoppingSaves = new Map();
+  instance.captureWriteQueue = Promise.resolve();
   return instance;
 }
 
@@ -28,13 +30,42 @@ test('worker exports parsed batch parts after a second cleaning pass', () => {
   assert.equal(second.batchParts[0].url, 'Items');
 });
 
-test('worker reconciles late capture with a saved request', () => {
+test('worker reconciles late capture with a saved request', async () => {
   const instance = worker();
   const request = { requestId: 'r', tabId: 1, method: 'GET',
     url: 'https://example.test/api/Items', timestamp: 100,
     responseBody: { captured: false } };
-  instance.sessions.set(1, { tabId: 1, networkRequests: [request] });
-  instance.handleCapturedResponse({ url: '/api/Items', method: 'GET', startTime: 101,
+  instance.sessions.set(1, { tabId: 1, isRecording: true, networkRequests: [request] });
+  await instance.handleCapturedResponse({ url: '/api/Items', method: 'GET', startTime: 101,
     responseData: 'ok', contentType: 'text/plain' }, 1);
   assert.equal(request.responseBody.data, 'ok');
+});
+
+test('a response arriving after stop repairs the stored export', async () => {
+  const stored = { fioriSessions: {} };
+  context.chrome = { storage: { local: {
+    async get() { return structuredClone(stored); },
+    async set(value) { stored.fioriSessions = structuredClone(value.fioriSessions); }
+  } } };
+  const instance = worker();
+  instance.stopAudioRecording = async () => null;
+  instance.notifyContentScript = async () => {};
+  instance.broadcastStateChange = () => {};
+  instance.audioRecordings = new Map();
+  instance.saveSession = async session => {
+    const result = await context.chrome.storage.local.get(['fioriSessions']);
+    result.fioriSessions[session.sessionId] = instance.cleanSessionData(session);
+    await context.chrome.storage.local.set(result);
+  };
+  const now = Date.now();
+  instance.sessions.set(1, { sessionId: 'synthetic', tabId: 1, startTime: now - 100,
+    pausedTime: 0, isRecording: true, metadata: {}, events: [], networkRequests: [{
+      requestId: 'r', tabId: 1, method: 'GET', url: 'https://example.test/api/Items',
+      timestamp: now - 50, responseBody: { captured: false }
+    }] });
+  await instance.stopRecording(1);
+  assert.equal(instance.sessions.has(1), false);
+  await instance.handleCapturedResponse({ url: '/api/Items', method: 'GET',
+    startTime: now - 49, responseData: 'late', status: 200 }, 1);
+  assert.equal(stored.fioriSessions.synthetic.networkRequests[0].responseBody.data, 'late');
 });
