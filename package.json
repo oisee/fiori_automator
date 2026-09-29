@@ -25,7 +25,7 @@
     "edge-extension",
     "chrome-extension"
   ],
-  "author": "SAP Development Team",
+  "author": "Alice Vinogradova",
   "license": "MIT",
   "devDependencies": {},
   "engines": {
@@ -33,9 +33,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-org/fiori-test-automation"
+    "url": "https://github.com/oisee/fiori_automator"
   },
   "bugs": {
-    "url": "https://github.com/your-org/fiori-test-automation/issues"
+    "url": "https://github.com/oisee/fiori_automator/issues"
   }
 }

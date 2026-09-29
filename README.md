@@ -343,3 +343,6 @@ The extension you're using today is capturing the data to make this future possi
 **Last Updated**: June 2025  
 **Chrome Manifest**: V3 Compatible  
 **Next Phase**: MCP-OData Bridge (Coming Soon)
+## License
+
+MIT, see [LICENSE](LICENSE).
