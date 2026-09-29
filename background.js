@@ -193,7 +193,9 @@ class FioriTestBackground {
         headers: capturedResponse.headers,
         truncated: capturedResponse.truncated,
         originalLength: capturedResponse.originalLength,
-        keptLength: capturedResponse.keptLength
+        keptLength: capturedResponse.keptLength,
+        responseType: capturedResponse.responseType,
+        byteLength: capturedResponse.byteLength
       };
     }
 
@@ -211,7 +213,9 @@ class FioriTestBackground {
           headers: response.headers,
           truncated: response.truncated,
           originalLength: response.originalLength,
-          keptLength: response.keptLength
+          keptLength: response.keptLength,
+          responseType: response.responseType,
+          byteLength: response.byteLength
         };
       }
     }

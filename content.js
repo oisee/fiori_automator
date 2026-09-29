@@ -166,17 +166,36 @@ if (!window.FioriTestCapture) {
       
       this.addEventListener('loadend', function() {
         if (this._fioriRequestData && self?.isRelevantForCapture(this._fioriRequestData.url, this._fioriRequestData.method)) {
+          const responseType = this.responseType || 'text';
+          const headers = this.getAllResponseHeaders();
+          const contentType = this.getResponseHeader('content-type') || '';
+          const isText = responseType === 'text';
+          let text = isText ? this.responseText : null;
+          const truncation = {};
+          if (isText && text.length > FIORI_RESPONSE_BODY_LIMIT) {
+            truncation.truncated = true;
+            truncation.originalLength = text.length;
+            truncation.keptLength = FIORI_RESPONSE_BODY_LIMIT;
+            text = text.slice(0, FIORI_RESPONSE_BODY_LIMIT);
+          }
+          const binaryLength = responseType === 'arraybuffer' ? this.response?.byteLength :
+            responseType === 'blob' ? this.response?.size :
+            Number(this.getResponseHeader('content-length')) || null;
           const responseData = {
             url: this._fioriRequestData.url,
             method: this._fioriRequestData.method,
             status: this.status,
             statusText: this.statusText,
-            responseText: this.responseText,
-            responseHeaders: this.getAllResponseHeaders(),
+            responseType,
+            responseData: text,
+            byteLength: isText ? undefined : binaryLength,
+            contentType,
+            headers,
+            ...truncation,
             startTime: this._fioriRequestData.startTime,
             endTime: Date.now()
           };
-          
+
           self.sendCapturedResponse(responseData);
         }
       });
