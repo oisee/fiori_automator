@@ -64,6 +64,18 @@ test('correlation follows tab and interaction sequence, preferring bound request
   assert.deepEqual(matches.get('c'), []);
 });
 
+test('correlation uses source time when asynchronous events arrive out of order', () => {
+  const events = [
+    { eventId: 'input', type: 'input', timestamp: 200 },
+    { eventId: 'click', type: 'click', timestamp: 100 }
+  ];
+  const requests = [{ requestId: 'after-input', tabId: 1, timestamp: 210,
+    url: '/api/Items' }];
+  const matches = logic.correlateTimeline(events, requests, 1);
+  assert.deepEqual(matches.get('click'), []);
+  assert.deepEqual(matches.get('input').map(request => request.requestId), ['after-input']);
+});
+
 
 test('batch parts remain clean after a second export pass', () => {
   const parsed = logic.cleanBatchParts(logic.parseBatch('--batch_demo\nGET Items HTTP/1.1\n\n--batch_demo--'));

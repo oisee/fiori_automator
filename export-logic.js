@@ -83,7 +83,8 @@ var FioriExportLogic = (() => {
 
   function correlateTimeline(events, requests, tabId) {
     const interactions = events.filter(event =>
-      ['click', 'input', 'navigation', 'page_unload', 'field_edit'].includes(event.type));
+      ['click', 'input', 'navigation', 'page_unload', 'field_edit'].includes(event.type))
+      .sort((a, b) => a.timestamp - b.timestamp);
     const matches = new Map();
     for (let index = 0; index < interactions.length; index++) {
       const event = interactions[index];
